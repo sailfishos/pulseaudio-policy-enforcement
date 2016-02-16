@@ -28,7 +28,7 @@ static pa_hook_result_t sink_input_fixate(void *, void *, void *);
 static pa_hook_result_t sink_input_put(void *, void *, void *);
 static pa_hook_result_t sink_input_unlink(void *, void *, void *);
 static pa_hook_result_t sink_input_state_changed(pa_core *c, pa_sink_input *si, struct userdata *u);
-#if (PULSEAUDIO_VERSION == 6)
+#if (PULSEAUDIO_VERSION >= 6)
 static pa_hook_result_t sink_input_mute_changed(pa_core *c, pa_sink_input *si, struct userdata *u);
 #endif
 
@@ -498,7 +498,7 @@ static void handle_new_sink_input(struct userdata      *u,
 #if (PULSEAUDIO_VERSION == 5)
         if (preserve_mute_state)
             pa_log_debug("ignoring mute state as PulseAudio version 5 doesn't have mute hook.");
-#elif (PULSEAUDIO_VERSION == 6)
+#elif (PULSEAUDIO_VERSION >= 6)
         if (preserve_mute_state)
             ext->local.mute_state = *preserve_mute_state;
         else
@@ -609,7 +609,7 @@ bool pa_sink_input_ext_mute(struct userdata *u, pa_sink_input *si, bool mute)
 
     pa_sink_input_set_mute(si, mute, true);
 
-#elif (PULSEAUDIO_VERSION == 6)
+#elif (PULSEAUDIO_VERSION >= 6)
 
     struct pa_sink_input_ext *ext;
     bool sink_input_muting_changed = false;
@@ -662,7 +662,7 @@ bool pa_sink_input_ext_mute(struct userdata *u, pa_sink_input *si, bool mute)
 #endif
 }
 
-#if (PULSEAUDIO_VERSION == 6)
+#if (PULSEAUDIO_VERSION >= 6)
 static pa_hook_result_t sink_input_mute_changed(pa_core *c, pa_sink_input *sinp, struct userdata *u)
 {
     struct pa_sink_input_ext *ext;
