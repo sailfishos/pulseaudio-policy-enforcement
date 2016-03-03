@@ -107,6 +107,8 @@ struct devicedef {
     char                    *arg;
     pa_hashmap              *ports; /* Key: device name, value:
                                      * pa_classify_port_entry. */
+    char                    *module;
+    char                    *module_args;
     uint32_t                 flags;
 };
 
@@ -179,6 +181,7 @@ static int activitydef_parse(int, char *, struct activitydef *);
 
 static int deviceprop_parse(int, enum device_class,char *,struct devicedef *);
 static int ports_parse(int, const char *, struct devicedef *);
+static int module_parse(int, const char *, struct devicedef *);
 static int streamprop_parse(int, char *, struct streamdef *);
 static int contextval_parse(int, char *, enum pa_classify_method *method, char **arg);
 static int contextsetprop_parse(int, char *, int *nact, struct ctxact **acts);
@@ -638,7 +641,9 @@ static int section_close(struct userdata *u, struct section *sec)
                 /* All devdef values are deep copied. */
                 pa_classify_add_sink(u, devdef->type,
                                      devdef->prop, devdef->method, devdef->arg,
-                                     devdef->ports, devdef->flags);
+                                     devdef->ports,
+                                     devdef->module, devdef->module_args,
+                                     devdef->flags);
                 break;
 
             case device_source:
@@ -646,6 +651,7 @@ static int section_close(struct userdata *u, struct section *sec)
                 pa_classify_add_source(u, devdef->type,
                                        devdef->prop, devdef->method,
                                        devdef->arg, devdef->ports,
+                                       devdef->module, devdef->module_args,
                                        devdef->flags);
                 break;
 
@@ -659,6 +665,8 @@ static int section_close(struct userdata *u, struct section *sec)
             pa_xfree(devdef->type);
             pa_xfree(devdef->prop);
             pa_xfree(devdef->arg);
+            pa_xfree(devdef->module);
+            pa_xfree(devdef->module_args);
             pa_xfree(devdef);
 
             break;
@@ -999,6 +1007,9 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
         }
         else if (!strncmp(line, "ports=", 6)) {
             sts = ports_parse(lineno, line+6, devdef);
+        }
+        else if (!strncmp(line, "module=", 7)) {
+            sts = module_parse(lineno, line+7, devdef);
         }
         else if (!strncmp(line, "flags=", 6)) {
             sts = flags_parse(lineno, line+6, section_device, &devdef->flags);
@@ -1341,6 +1352,39 @@ static int ports_parse(int lineno, const char *portsdef,
 
     } else
         pa_log_warn("Empty ports= definition in line %d", lineno);
+
+    return 0;
+}
+
+static int module_parse(int lineno, const char *portsdef,
+                       struct devicedef *devdef)
+{
+    char **entries;
+
+    if (devdef->module) {
+        pa_log("Duplicate module= line in line %d, using the last "
+               "occurrence.", lineno);
+
+        pa_xfree(devdef->module);
+        pa_xfree(devdef->module_args);
+        devdef->module = NULL;
+        devdef->module_args = NULL;
+    }
+
+    if ((entries = split_strv(portsdef, "@"))) {
+        if (!entries[0]) {
+            pa_log("Empty module part in module= definition in line %d", lineno);
+            pa_xstrfreev(entries);
+            return -1;
+        }
+
+        devdef->module = pa_xstrdup(entries[0]);
+        devdef->module_args = entries[1] ? pa_replace(entries[1], "%20", " ") : NULL;
+
+        pa_xstrfreev(entries);
+
+    } else
+        pa_log_warn("Empty module= definition in line %d", lineno);
 
     return 0;
 }
