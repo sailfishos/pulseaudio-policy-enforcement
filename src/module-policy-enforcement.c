@@ -186,7 +186,7 @@ void pa__done(pa_module *m) {
     pa_module_ext_subscription_free(u->smod);
 
     pa_policy_groupset_free(u->groups);
-    pa_classify_free(u->classify);
+    pa_classify_free(u);
     pa_policy_context_free(u->context);
     pa_index_hash_free(u->hsnk);
     pa_index_hash_free(u->hsi);

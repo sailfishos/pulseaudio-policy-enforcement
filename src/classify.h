@@ -91,6 +91,9 @@ struct pa_classify_device_data {
     pa_hashmap *ports; /* Key: device name, value: pa_classify_port_entry. If
                         * the device type doesn't require setting any ports,
                         * this is NULL. */
+    char       *module;     /* If module is defined for device when device
+                             * is activated that module is loaded. */
+    char       *module_args;
     uint32_t    flags; /* PA_POLICY_DISABLE_NOTIFY, etc */
 };
 
@@ -126,21 +129,29 @@ struct pa_classify_card {
     struct pa_classify_card_def  defs[1];
 };
 
+struct pa_classify_module {
+    const char                  *module_name;
+    pa_module                   *module;
+};
+
 struct pa_classify {
     struct pa_classify_stream    streams;
     struct pa_classify_device   *sinks;
     struct pa_classify_device   *sources;
     struct pa_classify_card     *cards;
+    struct pa_classify_module    module;
 };
 
 
 struct pa_classify *pa_classify_new(struct userdata *);
-void  pa_classify_free(struct pa_classify *);
+void  pa_classify_free(struct userdata *u);
 void  pa_classify_add_sink(struct userdata *, const char *, const char *,
                            enum pa_classify_method, const char *, pa_hashmap *,
+                           const char *module, const char *module_args,
                            uint32_t);
 void  pa_classify_add_source(struct userdata *, const char *, const char *,
                              enum pa_classify_method, const char *, pa_hashmap *,
+                             const char *module, const char *module_args,
                              uint32_t);
 void  pa_classify_add_card(struct userdata *, char *,
                            enum pa_classify_method[2], char **, char **, uint32_t[2]);
@@ -190,6 +201,8 @@ int pa_classify_is_port_sink_typeof(struct userdata *, struct pa_sink *,
 int pa_classify_is_port_source_typeof(struct userdata *, struct pa_source *,
                                       const char *,
                                       struct pa_classify_device_data **);
+
+int pa_classify_update_module(struct userdata *u, struct pa_classify_device_data *device);
 
 const char *pa_classify_method_str(enum pa_classify_method method);
 int   pa_classify_method_equals(const char *, union pa_classify_arg *);
