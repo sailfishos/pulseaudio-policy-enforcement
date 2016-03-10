@@ -92,6 +92,7 @@ static void register_rule(struct pa_policy_context_rule *rule,
     union  pa_policy_context_action    *actn;
     struct pa_policy_set_property      *setprop;
     struct pa_policy_del_property      *delprop;
+    struct pa_policy_override          *overr;
     struct pa_policy_object            *object;
     int                                 lineno;
 
@@ -109,6 +110,12 @@ static void register_rule(struct pa_policy_context_rule *rule,
             delprop = &actn->delprop;
             lineno  = delprop->lineno;
             object  = &delprop->object;
+            break;
+
+        case pa_policy_override:
+            overr   = &actn->overr;
+            lineno  = overr->lineno;
+            object  = &overr->object;
             break;
 
         default:
@@ -142,6 +149,7 @@ static void unregister_rule(struct pa_policy_context_rule *rule,
     union  pa_policy_context_action    *actn;
     struct pa_policy_set_property      *setprop;
     struct pa_policy_del_property      *delprop;
+    struct pa_policy_override          *overr;
     struct pa_policy_object            *object;
     int                                 lineno;
 
@@ -159,6 +167,12 @@ static void unregister_rule(struct pa_policy_context_rule *rule,
             delprop = &actn->delprop;
             lineno  = delprop->lineno;
             object  = &delprop->object;
+            break;
+
+        case pa_policy_override:
+            overr   = &actn->overr;
+            lineno  = overr->lineno;
+            object  = &overr->object;
             break;
 
         default:
@@ -275,6 +289,83 @@ pa_policy_context_set_default_action(struct pa_policy_context_rule *rule,
     setdef->default_state = default_state;
 
     append_action(&rule->actions, action);
+}
+
+void
+pa_policy_context_override_action(struct userdata               *u,
+                                  struct pa_policy_context_rule *rule,
+                                  int                            lineno,
+                                  enum pa_policy_object_type     obj_type,
+                                  enum pa_classify_method        obj_classify,
+                                  const char                    *obj_name,
+                                  const char                    *profile_name,
+                                  enum pa_policy_value_type      value_type,
+                                  ...                         /* value_arg */)
+{
+    union pa_policy_context_action *action;
+    struct pa_policy_override      *overr;
+    va_list                         value_arg;
+
+    action  = pa_xmalloc0(sizeof(*action));
+    overr = &action->overr;
+
+    overr->type   = pa_policy_override;
+    overr->lineno = lineno;
+
+    overr->object.type = obj_type;
+    match_setup(&overr->object.match, obj_classify, obj_name, NULL);
+
+    overr->profile = pa_xstrdup(profile_name);
+
+    va_start(value_arg, value_type);
+    value_setup(&overr->value, value_type, value_arg);
+    va_end(value_arg);
+
+    /* Store the value for the rule but set the method as true so
+     * that the value is always handled. */
+    rule->match.method = pa_classify_method_true;
+    overr->active_val = pa_xstrdup(rule->match.arg.string);
+
+    append_action(&rule->actions, action);
+    append_action(&u->context->overrides, action);
+}
+
+int pa_context_override_card_profile(struct userdata *u,
+                                     pa_card *card,
+                                     const char *pn,
+                                     const char **override_pn)
+{
+    union pa_policy_context_action     *actn;
+    struct pa_policy_override          *overr;
+    struct pa_policy_object            *object;
+    pa_card                            *actn_card;
+    const char                         *profile;
+
+    pa_assert(override_pn);
+
+    for (actn = u->context->overrides; actn; actn = actn->any.next)
+    {
+        pa_assert(actn->any.type == pa_policy_override);
+
+        overr   = &actn->overr;
+        object  = &overr->object;
+
+        if (!overr->active)
+            continue;
+
+        pa_assert(object->type == pa_policy_object_card);
+        pa_assert_se((actn_card = (pa_card *) object->ptr));
+
+        if (card == actn_card && !strcmp(overr->orig_profile, pn)) {
+            profile = overr->value.constant.string;
+            pa_log_debug("override: override card %s port %s to %s",
+                         card->name, pn, profile);
+            pa_assert_se((*override_pn = profile));
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 int pa_policy_context_variable_changed(struct userdata *u, const char *name,
@@ -499,6 +590,7 @@ static void delete_action(union pa_policy_context_action **actions,
 {
     union pa_policy_context_action *last;
     struct pa_policy_set_property  *setprop;
+    struct pa_policy_override      *overr;
 
     for (last = (union pa_policy_context_action *)actions;
          last->any.next != NULL;
@@ -520,6 +612,15 @@ static void delete_action(union pa_policy_context_action **actions,
 
             case pa_policy_set_default:
                 /* no-op */
+                break;
+
+            case pa_policy_override:
+                overr = &action->overr;
+                match_cleanup(&overr->object.match);
+                pa_xfree(overr->profile);
+                pa_xfree(overr->orig_profile);
+                pa_xfree(overr->active_val);
+                value_cleanup(&overr->value);
                 break;
 
             default:
@@ -545,14 +646,86 @@ static int perform_action(struct userdata                *u,
     struct pa_policy_set_property *setprop;
     struct pa_policy_del_property *delprop;
     struct pa_policy_set_default  *setdef;
+    struct pa_policy_override     *overr;
     struct pa_policy_object       *object;
     const char                    *old_value;
     const char                    *prop_value;
+    const char                    *profile_value;
     const char                    *objname;
     const char                    *objtype;
+    pa_card                       *card;
+    pa_card_profile               *card_profile;
     int                            success;
 
     switch (action->any.type) {
+
+    case pa_policy_override:
+        overr   = &action->overr;
+        object  = &overr->object;
+
+        success = false;
+
+        if (object_assert(u, object)) {
+
+            pa_assert(object->type == pa_policy_object_card);
+            pa_assert_se((card = (pa_card *) object->ptr));
+
+            if (!strcmp(overr->active_val, var_value)) {
+                if (overr->active) {
+                    success = true;
+                    break;
+                }
+
+                pa_assert_se((profile_value = overr->value.constant.string));
+
+                pa_assert(!overr->orig_profile);
+                overr->orig_profile = pa_xstrdup(card->active_profile->name);
+
+                if ((card_profile = pa_hashmap_get(card->profiles, profile_value))) {
+                    pa_log_debug("override: setting card %s profile to override port %s",
+                                 card->name, profile_value);
+                    if (pa_card_set_profile(card, card_profile, false) < 0) {
+                        pa_log("failed to set card profile");
+                    } else {
+                        overr->active = 1;
+                        success = true;
+                    }
+                }
+            } else {
+                if (!overr->active && !overr->orig_profile) {
+                    success = true;
+                    break;
+                }
+
+                pa_assert_se((profile_value = overr->orig_profile));
+
+                /* If current profile is NOT override profile and
+                 * NOT profile to be overridden, don't change anything here. */
+                if (strcmp(card->active_profile->name, overr->value.constant.string) &&
+                    strcmp(card->active_profile->name, profile_value)) {
+
+                    overr->active = 0;
+                    success = true;
+                    pa_xfree(overr->orig_profile);
+                    overr->orig_profile = NULL;
+                    break;
+                }
+
+                if ((card_profile = pa_hashmap_get(card->profiles, profile_value))) {
+                    pa_log_debug("override: setting card %s profile to original port %s",
+                                 card->name, profile_value);
+                    if (pa_card_set_profile(card, card_profile, false) < 0) {
+                        pa_log("failed to set card profile");
+                    } else {
+                        overr->active = 0;
+                        success = true;
+                        pa_xfree(overr->orig_profile);
+                        overr->orig_profile = NULL;
+                    }
+                }
+            }
+        }
+        break;
 
     case pa_policy_set_property:
         setprop = &action->setprop;
