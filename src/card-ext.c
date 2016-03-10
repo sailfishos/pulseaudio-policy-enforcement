@@ -118,6 +118,7 @@ int pa_card_ext_set_profile(struct userdata *u, char *type)
     struct pa_card  *cards[2] = { NULL, NULL };
     int              priority;
     const char      *pn;
+    const char      *override_pn;
     const char      *cn;
     pa_card_profile *ap;
     pa_card_profile *new_profile;
@@ -152,6 +153,10 @@ int pa_card_ext_set_profile(struct userdata *u, char *type)
         pn = data->profile;
         if (!pn)
             continue;
+
+        if (pa_context_override_card_profile(u, card, pn, &override_pn))
+            pn = override_pn;
+
         new_profile = pa_hashmap_get(card->profiles, pn);
         cn = pa_card_ext_get_name(card);
 
