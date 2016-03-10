@@ -12,6 +12,7 @@ enum pa_policy_action_type {
     pa_policy_set_property,
     pa_policy_delete_property,
     pa_policy_set_default,
+    pa_policy_override,
 
     pa_policy_action_max
 };
@@ -97,11 +98,22 @@ struct pa_policy_set_default {
     int                                 default_state;
 };
 
+struct pa_policy_override {
+    PA_POLICY_CONTEXT_ACTION_COMMON;
+    struct pa_policy_object             object;
+    char                               *orig_profile;
+    char                               *profile;
+    char                               *active_val;
+    union pa_policy_value               value;
+    int                                 active;
+};
+
 union pa_policy_context_action {
     struct pa_policy_context_action_any any;
     struct pa_policy_set_property       setprop;
     struct pa_policy_del_property       delprop;
     struct pa_policy_set_default        setdef;
+    struct pa_policy_override           overr;
 };
 
 struct pa_policy_context_rule {
@@ -145,6 +157,7 @@ struct pa_policy_context {
         char                            *value;
     } variable_change[PA_POLICY_CONTEXT_MAX_CHANGES];
     int                                 variable_change_count;
+    union pa_policy_context_action     *overrides;
 };
 
 
@@ -178,6 +191,18 @@ void pa_policy_context_set_default_action(struct pa_policy_context_rule *rule,
                                           struct userdata *u,
                                           const char *activity_group,
                                           int default_state);
+
+void pa_policy_context_override_action(struct userdata *u,
+                                       struct pa_policy_context_rule *,int,
+                                       enum pa_policy_object_type,
+                                       enum pa_classify_method, const char *,
+                                       const char *,
+                                       enum pa_policy_value_type, ...);
+
+int pa_context_override_card_profile(struct userdata *u,
+                                     pa_card *card,
+                                     const char *pn,
+                                     const char **override_pn);
 
 /* collect context variable change as name and value. */
 int pa_policy_context_variable_changed(struct userdata *u, const char *name, const char *value);
