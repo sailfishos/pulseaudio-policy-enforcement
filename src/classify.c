@@ -95,16 +95,18 @@ struct pa_classify *pa_classify_new(struct userdata *u)
     return cl;
 }
 
-void pa_classify_free(struct pa_classify *cl)
+void pa_classify_free(struct userdata *u)
 {
+    struct pa_classify *cl = u->classify;
+
     if (cl) {
         pid_hash_free(cl->streams.pid_hash);
         streams_free(cl->streams.defs);
         devices_free(cl->sinks);
         devices_free(cl->sources);
         cards_free(cl->cards);
-        if (cl->module.module)
-            pa_module_unload(cl->module.module->core,
+        if (cl->module.module && u->core->state != PA_CORE_SHUTDOWN)
+            pa_module_unload(u->core,
                              cl->module.module, true);
 
         pa_xfree(cl);

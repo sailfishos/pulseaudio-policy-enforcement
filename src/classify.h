@@ -144,7 +144,7 @@ struct pa_classify {
 
 
 struct pa_classify *pa_classify_new(struct userdata *);
-void  pa_classify_free(struct pa_classify *);
+void  pa_classify_free(struct userdata *u);
 void  pa_classify_add_sink(struct userdata *, const char *, const char *,
                            enum pa_classify_method, const char *, pa_hashmap *,
                            const char *module, const char *module_args,
