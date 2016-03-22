@@ -1056,7 +1056,11 @@ static void devices_add(struct pa_classify_device **p_devices, const char *type,
 
     devs->ndef++;
 
+#if (PULSEAUDIO_VERSION >= 8)
+    ports_string = pa_strbuf_to_string_free(buf);
+#else
     ports_string = pa_strbuf_tostring_free(buf);
+#endif
 
     pa_log_info("device '%s' added (%s|%s|%s|%s|0x%04x)",
                 type, d->prop, method_name, arg, ports_string, d->data.flags);
