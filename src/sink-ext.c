@@ -255,6 +255,8 @@ int pa_sink_ext_set_ports(struct userdata *u, const char *type)
             if (!ext)
                 continue;
 
+            pa_classify_update_module(u, data);
+
             if (ext->overridden_port) {
                 pa_xfree(ext->overridden_port);
                 ext->overridden_port = pa_xstrdup(port);
@@ -272,7 +274,6 @@ int pa_sink_ext_set_ports(struct userdata *u, const char *type)
                 ret = set_port_add(u, sink, port, data->flags & PA_POLICY_DELAYED_PORT_CHANGE, true);
                 continue;
             }
-
         }
     } /* for */
 

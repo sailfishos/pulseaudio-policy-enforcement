@@ -56,6 +56,7 @@ static struct pa_classify_stream_def
 static void devices_free(struct pa_classify_device *);
 static void devices_add(struct pa_classify_device **, const char *,
                         const char *,  enum pa_classify_method, const char *, pa_hashmap *,
+                        const char *module, const char *module_args,
                         uint32_t);
 static int devices_classify(struct pa_classify_device_def *, pa_proplist *,
                             const char *, uint32_t, uint32_t, char *, int);
@@ -94,14 +95,23 @@ struct pa_classify *pa_classify_new(struct userdata *u)
     return cl;
 }
 
-void pa_classify_free(struct pa_classify *cl)
+void pa_classify_free(struct userdata *u)
 {
+    struct pa_classify *cl = u->classify;
+
     if (cl) {
         pid_hash_free(cl->streams.pid_hash);
         streams_free(cl->streams.defs);
         devices_free(cl->sinks);
         devices_free(cl->sources);
         cards_free(cl->cards);
+        if (cl->module.module && u->core->state != PA_CORE_SHUTDOWN)
+#if (PULSEAUDIO_VERSION >= 8)
+            pa_module_unload(cl->module.module, true);
+#else
+            pa_module_unload(u->core,
+                             cl->module.module, true);
+#endif
 
         pa_xfree(cl);
     }
@@ -109,7 +119,9 @@ void pa_classify_free(struct pa_classify *cl)
 
 void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop,
                           enum pa_classify_method method, const char *arg,
-                          pa_hashmap *ports, uint32_t flags)
+                          pa_hashmap *ports,
+                          const char *module, const char *module_args,
+                          uint32_t flags)
 {
     struct pa_classify *classify;
 
@@ -120,12 +132,15 @@ void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop
     pa_assert(prop);
     pa_assert(arg);
 
-    devices_add(&classify->sinks, type, prop, method, arg, ports, flags);
+    devices_add(&classify->sinks, type, prop, method, arg, ports,
+                module, module_args, flags);
 }
 
 void pa_classify_add_source(struct userdata *u, const char *type, const char *prop,
                             enum pa_classify_method method, const char *arg,
-                            pa_hashmap *ports, uint32_t flags)
+                            pa_hashmap *ports,
+                            const char *module, const char *module_args,
+                            uint32_t flags)
 {
     struct pa_classify *classify;
 
@@ -136,7 +151,8 @@ void pa_classify_add_source(struct userdata *u, const char *type, const char *pr
     pa_assert(prop);
     pa_assert(arg);
 
-    devices_add(&classify->sources, type, prop, method, arg, ports, flags);
+    devices_add(&classify->sources, type, prop, method, arg, ports,
+                module, module_args, flags);
 }
 
 void pa_classify_add_card(struct userdata *u, char *type,
@@ -462,6 +478,37 @@ int pa_classify_is_port_source_typeof(struct userdata *u,
     name = pa_source_ext_get_name(source);
 
     return port_device_is_typeof(defs, name, type, d);
+}
+
+
+int pa_classify_update_module(struct userdata *u,
+                              struct pa_classify_device_data *devdata) {
+    pa_assert(u);
+    pa_assert(devdata);
+
+    if (u->classify->module.module &&
+        u->classify->module.module_name != devdata->module) {
+        pa_log_debug("Unload module %s", u->classify->module.module_name);
+        pa_module_unload_request(u->classify->module.module, true);
+        u->classify->module.module_name = NULL;
+        u->classify->module.module = NULL;
+    }
+
+    if (devdata->module && !u->classify->module.module) {
+        pa_log_debug("Load module %s %s", devdata->module,
+                                          devdata->module_args ? devdata->module_args : "");
+        u->classify->module.module = pa_module_load(u->core,
+                                                    devdata->module,
+                                                    devdata->module_args);
+        if (!u->classify->module.module) {
+            pa_log("Failed to load %s", devdata->module);
+            return -1;
+        }
+
+        u->classify->module.module_name = devdata->module;
+    }
+
+    return 0;
 }
 
 
@@ -961,6 +1008,9 @@ static void devices_free(struct pa_classify_device *devices)
                 regfree(&d->arg.rexp);
             else
                 pa_xfree((void *)d->arg.string);
+
+            pa_xfree(d->data.module);
+            pa_xfree(d->data.module_args);
         }
 
         pa_xfree(devices);
@@ -969,7 +1019,8 @@ static void devices_free(struct pa_classify_device *devices)
 
 static void devices_add(struct pa_classify_device **p_devices, const char *type,
                         const char *prop, enum pa_classify_method method, const char *arg,
-                        pa_hashmap *ports, uint32_t flags)
+                        pa_hashmap *ports, const char *module, const char *module_args,
+                        uint32_t flags)
 {
     struct pa_classify_device *devs;
     struct pa_classify_device_def *d;
@@ -1022,6 +1073,9 @@ static void devices_add(struct pa_classify_device **p_devices, const char *type,
             pa_strbuf_printf(buf, "%s:%s", port->device_name, port->port_name);
         }
     }
+
+    d->data.module = module ? pa_xstrdup(module) : NULL;
+    d->data.module_args = module_args ? pa_xstrdup(module_args) : NULL;
 
     d->data.flags = flags;
 

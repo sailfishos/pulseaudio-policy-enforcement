@@ -107,6 +107,8 @@ struct devicedef {
     char                    *arg;
     pa_hashmap              *ports; /* Key: device name, value:
                                      * pa_classify_port_entry. */
+    char                    *module;
+    char                    *module_args;
     uint32_t                 flags;
 };
 
@@ -179,17 +181,22 @@ static int activitydef_parse(int, char *, struct activitydef *);
 
 static int deviceprop_parse(int, enum device_class,char *,struct devicedef *);
 static int ports_parse(int, const char *, struct devicedef *);
+static int module_parse(int, const char *, struct devicedef *);
 static int streamprop_parse(int, char *, struct streamdef *);
 static int contextval_parse(int, char *, enum pa_classify_method *method, char **arg);
+static int contextdef_valid(int lineno);
 static int contextsetprop_parse(int, char *, int *nact, struct ctxact **acts);
 static int contextdelprop_parse(int, char *, int *nact, struct ctxact **acts);
 static int contextsetdef_parse(int lineno, char *setdefdef, int *nact, struct ctxact **acts);
+static int contextoverride_parse(int lineno, char *setdefdef, int *nact, struct ctxact **acts);
 static int contextanyprop_parse(int, char *, char *, struct anyprop *);
 static int cardname_parse(int, char *, struct carddef *, int field);
 static int flags_parse(int, char *, enum section_type, uint32_t *);
 static int valid_label(int, char *);
 
 static char **split_strv(const char *s, const char *delimiter);
+
+static int context_override_def_count;
 
 int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
 {
@@ -213,6 +220,10 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     int                success;
 
     pa_assert(u);
+
+    /* Context override definitions must be last in the configuration
+     * file and no other types can be defined after! */
+    context_override_def_count = 0;
 
     if (!cfgfile)
         cfgfile = DEFAULT_CONFIG_FILE;
@@ -638,7 +649,9 @@ static int section_close(struct userdata *u, struct section *sec)
                 /* All devdef values are deep copied. */
                 pa_classify_add_sink(u, devdef->type,
                                      devdef->prop, devdef->method, devdef->arg,
-                                     devdef->ports, devdef->flags);
+                                     devdef->ports,
+                                     devdef->module, devdef->module_args,
+                                     devdef->flags);
                 break;
 
             case device_source:
@@ -646,6 +659,7 @@ static int section_close(struct userdata *u, struct section *sec)
                 pa_classify_add_source(u, devdef->type,
                                        devdef->prop, devdef->method,
                                        devdef->arg, devdef->ports,
+                                       devdef->module, devdef->module_args,
                                        devdef->flags);
                 break;
 
@@ -659,6 +673,8 @@ static int section_close(struct userdata *u, struct section *sec)
             pa_xfree(devdef->type);
             pa_xfree(devdef->prop);
             pa_xfree(devdef->arg);
+            pa_xfree(devdef->module);
+            pa_xfree(devdef->module_args);
             pa_xfree(devdef);
 
             break;
@@ -766,6 +782,28 @@ static int section_close(struct userdata *u, struct section *sec)
                     }
 
                     pa_xfree(setdef->activity_group);
+
+                    break;
+
+                case pa_policy_override:
+                    setprop = &act->setprop;
+
+                    if (rule != NULL) {
+                        pa_policy_context_override_action(
+                                          u,
+                                          rule, act->lineno,
+                                          setprop->objtype,
+                                          setprop->method,
+                                          setprop->arg,
+                                          setprop->propnam,
+                                          setprop->valtype,
+                                          setprop->valarg
+                        );
+                    }
+
+                    pa_xfree(setprop->arg);
+                    pa_xfree(setprop->propnam);
+                    pa_xfree(setprop->valarg);
 
                     break;
 
@@ -1000,6 +1038,9 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
         else if (!strncmp(line, "ports=", 6)) {
             sts = ports_parse(lineno, line+6, devdef);
         }
+        else if (!strncmp(line, "module=", 7)) {
+            sts = module_parse(lineno, line+7, devdef);
+        }
         else if (!strncmp(line, "flags=", 6)) {
             sts = flags_parse(lineno, line+6, section_device, &devdef->flags);
         }
@@ -1180,6 +1221,9 @@ static int contextdef_parse(int lineno, char *line, struct contextdef *ctxdef)
         else if (!strncmp(line, "set-default=", 12)) {
             sts = contextsetdef_parse(lineno, line+12, &ctxdef->nact, &ctxdef->acts);
         }
+        else if (!strncmp(line, "override=", 9)) {
+            sts = contextoverride_parse(lineno, line+9, &ctxdef->nact, &ctxdef->acts);
+        }
         else {
             if ((end = strchr(line, '=')) == NULL) {
                 pa_log("invalid definition '%s' in line %d", line, lineno);
@@ -1345,6 +1389,39 @@ static int ports_parse(int lineno, const char *portsdef,
     return 0;
 }
 
+static int module_parse(int lineno, const char *portsdef,
+                       struct devicedef *devdef)
+{
+    char **entries;
+
+    if (devdef->module) {
+        pa_log("Duplicate module= line in line %d, using the last "
+               "occurrence.", lineno);
+
+        pa_xfree(devdef->module);
+        pa_xfree(devdef->module_args);
+        devdef->module = NULL;
+        devdef->module_args = NULL;
+    }
+
+    if ((entries = split_strv(portsdef, "@"))) {
+        if (!entries[0]) {
+            pa_log("Empty module part in module= definition in line %d", lineno);
+            pa_xstrfreev(entries);
+            return -1;
+        }
+
+        devdef->module = pa_xstrdup(entries[0]);
+        devdef->module_args = entries[1] ? pa_replace(entries[1], "%20", " ") : NULL;
+
+        pa_xstrfreev(entries);
+
+    } else
+        pa_log_warn("Empty module= definition in line %d", lineno);
+
+    return 0;
+}
+
 static int streamprop_parse(int lineno,char *propdef,struct streamdef *strdef)
 {
     char *colon;
@@ -1418,6 +1495,14 @@ static int contextval_parse(int lineno,char *valdef, enum pa_classify_method *me
     return 0;
 }
 
+static int contextdef_valid(int lineno) {
+    if (context_override_def_count > 0) {
+        pa_log("invalid definition on line %d: context override definitions must be last!", lineno);
+        return 0;
+    } else
+        return 1;
+}
+
 static int contextsetprop_parse(int lineno, char *setpropdef,
                                 int *nact, struct ctxact **acts)
 {
@@ -1435,6 +1520,9 @@ static int contextsetprop_parse(int lineno, char *setpropdef,
     /*
      * sink-name@startswidth:alsa,property:foo,value@constant:bar
      */
+
+    if (!contextdef_valid(lineno))
+        return -1;
 
     size = sizeof(*act) * (*nact + 1);
     act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
@@ -1459,6 +1547,11 @@ static int contextsetprop_parse(int lineno, char *setpropdef,
     objdef  = setpropdef;
     propdef = comma1 + 1;
     valdef  = comma2 + 1;
+
+    if (strncmp(propdef, "property:", 9) != 0) {
+        pa_log("invalid argument '%s' in line %d", propdef, lineno);
+        return -1;
+    }
 
     if (!strncmp(valdef, "value@constant:", 15)) {
         setprop->valtype = pa_policy_value_constant;
@@ -1496,6 +1589,9 @@ static int contextdelprop_parse(int lineno, char *delpropdef,
     /*
      * sink-name@startswidth:alsa,property:foo
      */
+
+    if (!contextdef_valid(lineno))
+        return -1;
 
     size = sizeof(*act) * (*nact + 1);
     act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
@@ -1539,6 +1635,9 @@ static int contextsetdef_parse(int lineno, char *setdefdef,
      * activity-group:<active/inactive/state>
      */
 
+    if (!contextdef_valid(lineno))
+        return -1;
+
     size = sizeof(*act) * (*nact + 1);
     act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
 
@@ -1575,6 +1674,75 @@ static int contextsetdef_parse(int lineno, char *setdefdef,
     (*nact)++;
 
     return 0;
+}
+
+static int contextoverride_parse(int lineno, char *setoverridedef,
+                                int *nact, struct ctxact **acts)
+{
+    size_t          size;
+    struct ctxact  *act;
+    struct setprop *setprop;
+    struct anyprop *anyprop;
+    char           *comma1;
+    char           *comma2;
+    char           *objdef;
+    char           *propdef;
+    char           *valdef;
+    char           *valarg;
+
+    /*
+     * card-name@startswidth:foo,profile:bar,value@constant:foobar
+     */
+
+    size = sizeof(*act) * (*nact + 1);
+    act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
+
+    memset(act, 0, sizeof(*act));
+    act->type   = pa_policy_override;
+    act->lineno = lineno;
+
+    setprop = &act->setprop;
+    anyprop = &act->anyprop;
+
+    if ((comma1 = strchr(setoverridedef, ',')) == NULL ||
+        (comma2 = strchr(comma1 + 1, ',')) == NULL   )
+    {
+        pa_log("invalid definition '%s' in line %d", setoverridedef, lineno);
+        return -1;
+    }
+
+    *comma1 = '\0';
+    *comma2 = '\0';
+
+    objdef  = setoverridedef;
+    propdef = comma1 + 1;
+    valdef  = comma2 + 1;
+
+    if (strncmp(propdef, "profile:", 8) != 0) {
+        pa_log("invalid argument '%s' in line %d", propdef, lineno);
+        return -1;
+    }
+
+    if (!strncmp(valdef, "value@constant:", 15)) {
+        setprop->valtype = pa_policy_value_constant;
+        valarg = valdef + 15;
+    }
+    else {
+        pa_log("invalid value definition '%s' in line %d", valdef, lineno);
+        return -1;
+    }
+
+    if (contextanyprop_parse(lineno, objdef, propdef, anyprop) < 0)
+        return -1;
+
+    setprop->valarg  = valarg ? pa_xstrdup(valarg) : NULL;
+
+    (*nact)++;
+
+    context_override_def_count++;
+
+    return 0;
+
 }
 
 static int contextanyprop_parse(int lineno, char *objdef, char *propdef,
@@ -1640,6 +1808,8 @@ static int contextanyprop_parse(int lineno, char *objdef, char *propdef,
     
     if (!strncmp(propdef, "property:", 9))
         propnam = propdef + 9;
+    else if (!strncmp(propdef, "profile:", 8))
+        propnam = propdef + 8;
     else {
         pa_log("invalid property definition '%s' in line %d", propdef, lineno);
         return -1;
