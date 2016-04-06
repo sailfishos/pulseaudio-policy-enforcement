@@ -10,6 +10,8 @@
 #include <pulsecore/sink-input.h>
 #include <pulsecore/source-output.h>
 #include <pulsecore/strbuf.h>
+#include <pulsecore/core.h>
+#include <pulsecore/hook-list.h>
 
 #include "classify.h"
 #include "policy-group.h"
@@ -54,7 +56,8 @@ static struct pa_classify_stream_def
                           struct pa_classify_stream_def **);
 
 static void devices_free(struct pa_classify_device *);
-static void devices_add(struct pa_classify_device **, const char *,
+static void devices_add(struct userdata *,
+                        struct pa_classify_device **, const char *,
                         const char *,  enum pa_classify_method, const char *, pa_hashmap *,
                         const char *module, const char *module_args,
                         uint32_t);
@@ -80,6 +83,7 @@ static const char *method_str(enum pa_classify_method);
 
 const char *get_property(const char *, pa_proplist *, const char *);
 
+static pa_hook_result_t module_unlink_hook_cb(pa_core *c, pa_module *m, struct pa_classify *cl);
 
 
 struct pa_classify *pa_classify_new(struct userdata *u)
@@ -98,6 +102,7 @@ struct pa_classify *pa_classify_new(struct userdata *u)
 void pa_classify_free(struct userdata *u)
 {
     struct pa_classify *cl = u->classify;
+    uint32_t i;
 
     if (cl) {
         pid_hash_free(cl->streams.pid_hash);
@@ -105,13 +110,19 @@ void pa_classify_free(struct userdata *u)
         devices_free(cl->sinks);
         devices_free(cl->sources);
         cards_free(cl->cards);
-        if (cl->module.module && u->core->state != PA_CORE_SHUTDOWN)
+        if (cl->module_unlink_hook_slot)
+            pa_hook_slot_free(cl->module_unlink_hook_slot);
+
+        for (i = 0; i < PA_POLICY_MODULE_COUNT; i++) {
+            if (cl->module[i].module) {
 #if (PULSEAUDIO_VERSION >= 8)
-            pa_module_unload(cl->module.module, true);
+                pa_module_unload(cl->module[i].module, true);
 #else
-            pa_module_unload(u->core,
-                             cl->module.module, true);
+                pa_module_unload(u->core,
+                                 cl->module[i].module, true);
 #endif
+            }
+        }
 
         pa_xfree(cl);
     }
@@ -132,7 +143,7 @@ void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop
     pa_assert(prop);
     pa_assert(arg);
 
-    devices_add(&classify->sinks, type, prop, method, arg, ports,
+    devices_add(u, &classify->sinks, type, prop, method, arg, ports,
                 module, module_args, flags);
 }
 
@@ -151,7 +162,7 @@ void pa_classify_add_source(struct userdata *u, const char *type, const char *pr
     pa_assert(prop);
     pa_assert(arg);
 
-    devices_add(&classify->sources, type, prop, method, arg, ports,
+    devices_add(u, &classify->sources, type, prop, method, arg, ports,
                 module, module_args, flags);
 }
 
@@ -481,34 +492,67 @@ int pa_classify_is_port_source_typeof(struct userdata *u,
 }
 
 
+
+
 int pa_classify_update_module(struct userdata *u,
+                              uint32_t type,
                               struct pa_classify_device_data *devdata) {
     pa_assert(u);
     pa_assert(devdata);
+    pa_assert(type < PA_POLICY_MODULE_COUNT);
 
-    if (u->classify->module.module &&
-        u->classify->module.module_name != devdata->module) {
-        pa_log_debug("Unload module %s", u->classify->module.module_name);
-        pa_module_unload_request(u->classify->module.module, true);
-        u->classify->module.module_name = NULL;
-        u->classify->module.module = NULL;
+    if (u->classify->module[type].module &&
+        !pa_safe_streq(u->classify->module[type].module_name, devdata->module) &&
+        !pa_safe_streq(u->classify->module[type].module_args, devdata->module_args)) {
+
+        pa_log_debug("Unload module for %s: %s", type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
+                                                 u->classify->module[type].module_name);
+        pa_module_unload_request(u->classify->module[type].module, true);
+        u->classify->module[type].module_name = NULL;
+        u->classify->module[type].module_args = NULL;
+        u->classify->module[type].module = NULL;
     }
 
-    if (devdata->module && !u->classify->module.module) {
-        pa_log_debug("Load module %s %s", devdata->module,
-                                          devdata->module_args ? devdata->module_args : "");
-        u->classify->module.module = pa_module_load(u->core,
-                                                    devdata->module,
-                                                    devdata->module_args);
-        if (!u->classify->module.module) {
+    if (devdata->module && !u->classify->module[type].module) {
+        pa_log_debug("Load module for %s: %s %s", type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
+                                                  devdata->module,
+                                                  devdata->module_args ? devdata->module_args : "");
+        u->classify->module[type].module = pa_module_load(u->core,
+                                                          devdata->module,
+                                                          devdata->module_args);
+        if (!u->classify->module[type].module) {
             pa_log("Failed to load %s", devdata->module);
             return -1;
         }
 
-        u->classify->module.module_name = devdata->module;
+        u->classify->module[type].module_name = devdata->module;
+        u->classify->module[type].module_args = devdata->module_args;
     }
 
     return 0;
+}
+
+
+static pa_hook_result_t module_unlink_hook_cb(pa_core *c, pa_module *m, struct pa_classify *cl) {
+    uint32_t i;
+
+    pa_assert(c);
+    pa_assert(m);
+    pa_assert(cl);
+
+    for (i = 0; i < PA_POLICY_MODULE_COUNT; i++) {
+        if (cl->module[i].module == m) {
+            pa_log_debug("Module for %s unloading: %s",
+                         i == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
+                         m->name);
+            cl->module[i].module = NULL;
+            cl->module[i].module_name = NULL;
+            cl->module[i].module_args = NULL;
+            break;
+        }
+    }
+
+    return PA_HOOK_OK;
 }
 
 
@@ -1017,7 +1061,7 @@ static void devices_free(struct pa_classify_device *devices)
     }
 }
 
-static void devices_add(struct pa_classify_device **p_devices, const char *type,
+static void devices_add(struct userdata *u, struct pa_classify_device **p_devices, const char *type,
                         const char *prop, enum pa_classify_method method, const char *arg,
                         pa_hashmap *ports, const char *module, const char *module_args,
                         uint32_t flags)
@@ -1076,6 +1120,12 @@ static void devices_add(struct pa_classify_device **p_devices, const char *type,
 
     d->data.module = module ? pa_xstrdup(module) : NULL;
     d->data.module_args = module_args ? pa_xstrdup(module_args) : NULL;
+
+    if (d->data.module && !u->classify->module_unlink_hook_slot)
+        u->classify->module_unlink_hook_slot = pa_hook_connect(&u->core->hooks[PA_CORE_HOOK_MODULE_UNLINK],
+                                                               PA_HOOK_NORMAL,
+                                                               (pa_hook_cb_t) module_unlink_hook_cb,
+                                                               u->classify);
 
     d->data.flags = flags;
 

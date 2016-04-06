@@ -255,7 +255,7 @@ int pa_sink_ext_set_ports(struct userdata *u, const char *type)
             if (!ext)
                 continue;
 
-            pa_classify_update_module(u, data);
+            pa_classify_update_module(u, PA_POLICY_MODULE_FOR_SINK, data);
 
             if (ext->overridden_port) {
                 pa_xfree(ext->overridden_port);

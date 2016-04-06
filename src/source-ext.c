@@ -143,7 +143,7 @@ int pa_source_ext_set_ports(struct userdata *u, const char *type)
             pa_assert_se(port_entry = pa_hashmap_get(data->ports,
                                                      source->name));
 
-            pa_classify_update_module(u, data);
+            pa_classify_update_module(u, PA_POLICY_MODULE_FOR_SOURCE, data);
 
             if (!source->active_port ||
                     !pa_streq(port_entry->port_name,

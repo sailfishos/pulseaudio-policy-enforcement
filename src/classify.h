@@ -22,6 +22,11 @@
 #define PA_POLICY_REFRESH_PORT_ALWAYS (1UL << 3)
 #define PA_POLICY_DELAYED_PORT_CHANGE (1UL << 4)
 
+/* module type */
+#define PA_POLICY_MODULE_FOR_SINK   (0)
+#define PA_POLICY_MODULE_FOR_SOURCE (1)
+#define PA_POLICY_MODULE_COUNT      (2)
+
 struct pa_sink;
 struct pa_source;
 struct pa_sink_input;
@@ -131,6 +136,7 @@ struct pa_classify_card {
 
 struct pa_classify_module {
     const char                  *module_name;
+    const char                  *module_args;
     pa_module                   *module;
 };
 
@@ -139,7 +145,8 @@ struct pa_classify {
     struct pa_classify_device   *sinks;
     struct pa_classify_device   *sources;
     struct pa_classify_card     *cards;
-    struct pa_classify_module    module;
+    struct pa_classify_module    module[PA_POLICY_MODULE_COUNT];
+    pa_hook_slot                *module_unlink_hook_slot;
 };
 
 
@@ -202,7 +209,7 @@ int pa_classify_is_port_source_typeof(struct userdata *, struct pa_source *,
                                       const char *,
                                       struct pa_classify_device_data **);
 
-int pa_classify_update_module(struct userdata *u, struct pa_classify_device_data *device);
+int pa_classify_update_module(struct userdata *u, uint32_t type, struct pa_classify_device_data *device);
 
 const char *pa_classify_method_str(enum pa_classify_method method);
 int   pa_classify_method_equals(const char *, union pa_classify_arg *);
