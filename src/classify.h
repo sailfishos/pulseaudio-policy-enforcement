@@ -22,6 +22,9 @@
 #define PA_POLICY_REFRESH_PORT_ALWAYS (1UL << 3)
 #define PA_POLICY_DELAYED_PORT_CHANGE (1UL << 4)
 
+/* module flags */
+#define PA_POLICY_MODULE_UNLOAD_IMMEDIATELY (1UL << 5)
+
 /* module type */
 #define PA_POLICY_MODULE_FOR_SINK   (0)
 #define PA_POLICY_MODULE_FOR_SOURCE (1)
@@ -138,6 +141,7 @@ struct pa_classify_module {
     const char                  *module_name;
     const char                  *module_args;
     pa_module                   *module;
+    uint32_t                     flags;
 };
 
 struct pa_classify {
