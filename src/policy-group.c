@@ -587,8 +587,8 @@ void pa_policy_group_remove_sink_input(struct userdata *u, uint32_t idx)
                 group->sinpcnt--;
 
                 if (group->num_moving > 0 && !sl->sink_input->sink) {
-                    pa_log_error("Removing a moving sink input %s",
-                                 pa_sink_input_ext_get_name(sl->sink_input));
+                    pa_log_info("Removing a moving sink input %s",
+                                pa_sink_input_ext_get_name(sl->sink_input));
                     group->num_moving--;
                 }
 
@@ -704,7 +704,7 @@ void pa_policy_group_remove_source_output(struct userdata *u, uint32_t idx)
                 group->soutcnt--;
 
                 if (group->num_moving > 0 && !sl->source_output) {
-                    pa_log_error("Removing a moving source output %s",
+                    pa_log_info("Removing a moving source output %s",
                                 pa_source_output_ext_get_name(sl->source_output));
                     group->num_moving--;
                 }

@@ -86,6 +86,17 @@ const char *get_property(const char *, pa_proplist *, const char *);
 static pa_hook_result_t module_unlink_hook_cb(pa_core *c, pa_module *m, struct pa_classify *cl);
 
 
+static void unload_module(pa_module *m)
+{
+    if (m) {
+#if (PULSEAUDIO_VERSION >= 8)
+        pa_module_unload(m, true);
+#else
+        pa_module_unload(u->core, m, true);
+#endif
+    }
+}
+
 struct pa_classify *pa_classify_new(struct userdata *u)
 {
     struct pa_classify *cl;
@@ -113,16 +124,8 @@ void pa_classify_free(struct userdata *u)
         if (cl->module_unlink_hook_slot)
             pa_hook_slot_free(cl->module_unlink_hook_slot);
 
-        for (i = 0; i < PA_POLICY_MODULE_COUNT; i++) {
-            if (cl->module[i].module) {
-#if (PULSEAUDIO_VERSION >= 8)
-                pa_module_unload(cl->module[i].module, true);
-#else
-                pa_module_unload(u->core,
-                                 cl->module[i].module, true);
-#endif
-            }
-        }
+        for (i = 0; i < PA_POLICY_MODULE_COUNT; i++)
+            unload_module(cl->module[i].module);
 
         pa_xfree(cl);
     }
@@ -497,36 +500,46 @@ int pa_classify_is_port_source_typeof(struct userdata *u,
 int pa_classify_update_module(struct userdata *u,
                               uint32_t type,
                               struct pa_classify_device_data *devdata) {
+    struct pa_classify_module *m;
+
     pa_assert(u);
     pa_assert(devdata);
     pa_assert(type < PA_POLICY_MODULE_COUNT);
 
-    if (u->classify->module[type].module &&
-        !pa_safe_streq(u->classify->module[type].module_name, devdata->module) &&
-        !pa_safe_streq(u->classify->module[type].module_args, devdata->module_args)) {
+    m = &u->classify->module[type];
 
-        pa_log_debug("Unload module for %s: %s", type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
-                                                 u->classify->module[type].module_name);
-        pa_module_unload_request(u->classify->module[type].module, true);
-        u->classify->module[type].module_name = NULL;
-        u->classify->module[type].module_args = NULL;
-        u->classify->module[type].module = NULL;
+    if (m->module &&
+        !pa_safe_streq(m->module_name, devdata->module) &&
+        !pa_safe_streq(m->module_args, devdata->module_args)) {
+
+        pa_log_debug("Unload %smodule for %s: %s",
+                     m->flags & PA_POLICY_MODULE_UNLOAD_IMMEDIATELY ? "" : "request for ",
+                     type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
+                     m->module_name);
+        if (m->flags & PA_POLICY_MODULE_UNLOAD_IMMEDIATELY)
+            unload_module(m->module);
+        else
+            pa_module_unload_request(m->module, true);
+        m->module_name = NULL;
+        m->module_args = NULL;
+        m->module = NULL;
     }
 
-    if (devdata->module && !u->classify->module[type].module) {
+    if (devdata->module && !m->module) {
         pa_log_debug("Load module for %s: %s %s", type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
                                                   devdata->module,
                                                   devdata->module_args ? devdata->module_args : "");
-        u->classify->module[type].module = pa_module_load(u->core,
-                                                          devdata->module,
-                                                          devdata->module_args);
-        if (!u->classify->module[type].module) {
+        m->module = pa_module_load(u->core,
+                                   devdata->module,
+                                   devdata->module_args);
+        if (!m->module) {
             pa_log("Failed to load %s", devdata->module);
             return -1;
         }
 
-        u->classify->module[type].module_name = devdata->module;
-        u->classify->module[type].module_args = devdata->module_args;
+        m->module_name = devdata->module;
+        m->module_args = devdata->module_args;
+        m->flags = devdata->flags;
     }
 
     return 0;
