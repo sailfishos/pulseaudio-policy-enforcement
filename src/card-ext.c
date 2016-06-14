@@ -83,19 +83,19 @@ const char *pa_card_ext_get_name(struct pa_card *card)
 
 char **pa_card_ext_get_profiles(struct pa_card *card)
 {
-#define MAX_PROF 16
-
     pa_card_profile  *p;
     char            **plist = NULL;
-    int               size  = sizeof(char *) * MAX_PROF;
+    int               size;
     void             *st;
     int               l;
 
-    if (card->profiles && (plist = pa_xmalloc(size)) != NULL) {
-        memset(plist, 0, size);
+    if (card->profiles) {
+        size = sizeof(char *) * (pa_hashmap_size(card->profiles) + 1);
+
+        plist = pa_xmalloc0(size);
 
         for (l = 0, st = NULL;
-             (p = pa_hashmap_iterate(card->profiles,&st,NULL)) && l < MAX_PROF;
+             (p = pa_hashmap_iterate(card->profiles,&st,NULL));
              l++)
         {
             plist[l] = p->name;
@@ -104,8 +104,6 @@ char **pa_card_ext_get_profiles(struct pa_card *card)
     }
 
     return plist;
-
-#undef MAX_PROF
 }
 
 int pa_card_ext_set_profile(struct userdata *u, char *type)
