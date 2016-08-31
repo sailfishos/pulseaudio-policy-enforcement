@@ -759,6 +759,7 @@ int pa_policy_group_move_to(struct userdata *u, const char *name,
     target.class = class;
     target.mode  = mode ? mode : "";
     target.hwid  = hwid ? hwid : "";
+    target.any   = NULL;
 
     switch (class) {
         
@@ -778,7 +779,10 @@ int pa_policy_group_move_to(struct userdata *u, const char *name,
     }
 
 
-    if (target.any != NULL) {
+    if (target.any == NULL) {
+        pa_log("pa_policy_group_move_to(): could not find %s for type %s name %s",
+               target_is_sink ? "sink" : "source", type, name);
+    } else {
         if (name) {             /* move the specified group only */
             if ((grp = find_group_by_name(u->groups, name, NULL)) != NULL) {
                 if (!(grp->flags & PA_POLICY_GROUP_FLAG_ROUTE_AUDIO))
