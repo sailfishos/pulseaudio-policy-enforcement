@@ -9,10 +9,7 @@
 #include "card-ext.h"
 #include "classify.h"
 #include "context.h"
-
-/* this included for the sake of pa_policy_send_device_state()
-   which is temporarily hosted by sink-ext.c*/
-#include "sink-ext.h"
+#include "policy.h"
 
 
 /* hooks */

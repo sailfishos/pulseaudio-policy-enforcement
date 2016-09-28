@@ -32,8 +32,6 @@ void pa_sink_ext_set_volumes(struct userdata *);
 void pa_sink_ext_override_port(struct userdata *, struct pa_sink *, char *);
 void pa_sink_ext_restore_port(struct userdata *, struct pa_sink *);
 
-void pa_policy_send_device_state(struct userdata *, const char *, char *);
-
 #endif /* foosinkextfoo */
 
 /*
