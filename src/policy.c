@@ -11,6 +11,7 @@
 
 #include "policy.h"
 #include "dbusif.h"
+#include "classify.h"
 
 void pa_policy_send_device_state(struct userdata *u, const char *state,
                                  char *typelist)
@@ -58,3 +59,50 @@ void pa_policy_send_device_state(struct userdata *u, const char *state,
 #undef MAX_TYPE
 }
 
+void pa_policy_send_device_state_full(struct userdata *u)
+{
+    void             *state = NULL;
+    pa_idxset        *idxset;
+    struct pa_card   *card;
+    struct pa_sink   *sink;
+    struct pa_source *source;
+    const char       *typelist;
+    char              buf[1024];
+    int               len;
+
+    pa_assert(u);
+    pa_assert(u->core);
+
+    /* cards */
+    pa_assert_se((idxset = u->core->cards));
+    state = NULL;
+
+    while ((card = pa_idxset_iterate(idxset, &state, NULL))) {
+        len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
+                               buf, sizeof(buf));
+        if (len > 0)
+            pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+    }
+
+    /* sinks */
+    pa_assert_se((idxset = u->core->sinks));
+    state = NULL;
+
+    while ((sink = pa_idxset_iterate(idxset, &state, NULL))) {
+        len = pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY, 0,
+                               buf, sizeof(buf));
+        if (len > 0)
+            pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+    }
+
+    /* sources */
+    pa_assert_se((idxset = u->core->sources));
+    state = NULL;
+
+    while ((source = pa_idxset_iterate(idxset, &state, NULL))) {
+        len = pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0,
+                                 buf, sizeof(buf));
+        if (len > 0)
+            pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+    }
+}
