@@ -66,6 +66,7 @@ struct pa_policy_dbusif {
     char               *actrule; /* match rule to catch action signals */
     char               *strrule; /* match rule to catch stream info signals */
     int                 regist;  /* wheter or not registered to policy daemon*/
+    int                 re_regist;
 };
 
 struct actdsc {                 /* action descriptor */
@@ -422,6 +423,7 @@ static void handle_admin_message(struct userdata *u, DBusMessage *msg)
         pa_log_debug("policy decision point is up");
 
         if (!dbusif->regist) {
+            dbusif->re_regist = 1;
             register_to_pdp(dbusif, u);
         }
     }
@@ -963,8 +965,14 @@ static void registration_cb(DBusPendingCall *pend, void *data)
     else {
         pa_log_info("got reply to registration");
 
-        if (u->dbusif)
+        if (u->dbusif) {
             u->dbusif->regist = 1;
+
+            if (u->dbusif->re_regist) {
+                pa_log_info("re-send device state infos to policy decision point");
+                pa_policy_send_device_state_full(u);
+            }
+        }
     }
 
     dbus_message_unref(reply);

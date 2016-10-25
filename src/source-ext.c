@@ -17,10 +17,7 @@
 #include "context.h"
 #include "policy-group.h"
 #include "dbusif.h"
-
-/* this included for the sake of pa_policy_send_device_state()
-   which is temporarily hosted by sink-ext.c*/
-#include "sink-ext.h"
+#include "policy.h"
 
 /* hooks */
 static pa_hook_result_t source_put(void *, void *, void *);
