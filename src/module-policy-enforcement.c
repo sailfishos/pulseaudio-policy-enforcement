@@ -60,6 +60,7 @@ PA_MODULE_USAGE(
     "dbus_policyd_name=<policy daemon's name> "
     "null_sink_name=<name of the null sink> "
     "othermedia_preemption=<on|off> "
+    "route_sources_first=<true|false> Default false "
     "configdir=<configuration directory>"
 );
 
@@ -71,6 +72,7 @@ static const char* const valid_modargs[] = {
     "dbus_policyd_name",
     "null_sink_name",
     "othermedia_preemption",
+    "route_sources_first",
     "configdir",
     NULL
 };
@@ -86,6 +88,7 @@ int pa__init(pa_module *m) {
     const char      *pdnam;
     const char      *nsnam;
     const char      *preempt;
+    bool             route_sources_first = false;
     const char      *cfgdir;
     
     pa_assert(m);
@@ -104,7 +107,11 @@ int pa__init(pa_module *m) {
     preempt = pa_modargs_get_value(ma, "othermedia_preemption", NULL);
     cfgdir  = pa_modargs_get_value(ma, "configdir", NULL);
 
-    
+    if (pa_modargs_get_value_boolean(ma, "route_sources_first", &route_sources_first) < 0) {
+        pa_log("Failed to parse \"route_sources_first\" parameter.");
+        goto fail;
+    }
+
     u = pa_xnew0(struct userdata, 1);
     m->userdata = u;
     u->core     = m->core;
@@ -122,7 +129,7 @@ int pa__init(pa_module *m) {
     u->groups   = pa_policy_groupset_new(u);
     u->classify = pa_classify_new(u);
     u->context  = pa_policy_context_new(u);
-    u->dbusif   = pa_policy_dbusif_init(u, ifnam, mypath, pdpath, pdnam);
+    u->dbusif   = pa_policy_dbusif_init(u, ifnam, mypath, pdpath, pdnam, route_sources_first);
     u->shared   = pa_shared_data_get(u->core);
 
     if (u->scl == NULL      || u->ssnk == NULL     || u->ssrc == NULL ||
