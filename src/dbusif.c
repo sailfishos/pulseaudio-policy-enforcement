@@ -67,6 +67,7 @@ struct pa_policy_dbusif {
     char               *strrule; /* match rule to catch stream info signals */
     int                 regist;  /* wheter or not registered to policy daemon*/
     int                 re_regist;
+    bool                route_sources_first;
 };
 
 struct actdsc {                 /* action descriptor */
@@ -129,7 +130,8 @@ struct pa_policy_dbusif *pa_policy_dbusif_init(struct userdata *u,
                                                const char      *ifnam,
                                                const char      *mypath,
                                                const char      *pdpath,
-                                               const char      *pdnam)
+                                               const char      *pdnam,
+                                               bool             route_sources_first)
 {
     pa_module               *m = u->module;
     struct pa_policy_dbusif *dbusif = NULL;
@@ -140,6 +142,8 @@ struct pa_policy_dbusif *pa_policy_dbusif_init(struct userdata *u,
     char                     admrule[512];
     
     dbusif = pa_xnew0(struct pa_policy_dbusif, 1);
+
+    dbusif->route_sources_first = route_sources_first;
 
     dbus_error_init(&error);
     dbusif->conn = pa_dbus_bus_get(m->core, DBUS_BUS_SYSTEM, &error);
@@ -733,6 +737,17 @@ static int audio_route_parser(struct userdata *u, DBusMessageIter *actit)
     /* Detach groups. */
     num_moving = pa_policy_group_start_move_all(u);
     pa_log_debug("Policy groups moving: %d", num_moving);
+
+    if (u->dbusif->route_sources_first) {
+        /* Following works only if MAX_ROUTING_DECISIONS is 2, so make sure this is
+         * caught if the value ever changes. */
+        pa_assert_se(MAX_ROUTING_DECISIONS == 2);
+        if (num_decisions > 1 && decisions[0].class != pa_policy_route_to_source) {
+            struct routing_decision tmp = decisions[0];
+            decisions[0] = decisions[1];
+            decisions[1] = tmp;
+        }
+    }
 
     /* Set profiles and ports while the groups are detached. */
     for (i = 0; i < num_decisions; i++) {
