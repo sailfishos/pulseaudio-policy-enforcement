@@ -185,7 +185,6 @@ static int ports_parse(int, const char *, struct devicedef *);
 static int module_parse(int, const char *, struct devicedef *);
 static int streamprop_parse(int, char *, struct streamdef *);
 static int contextval_parse(int, char *, enum pa_classify_method *method, char **arg);
-static int contextdef_valid(int lineno);
 static int contextsetprop_parse(int, char *, int *nact, struct ctxact **acts);
 static int contextdelprop_parse(int, char *, int *nact, struct ctxact **acts);
 static int contextsetdef_parse(int lineno, char *setdefdef, int *nact, struct ctxact **acts);
@@ -196,8 +195,6 @@ static int flags_parse(int, char *, enum section_type, uint32_t *);
 static int valid_label(int, char *);
 
 static char **split_strv(const char *s, const char *delimiter);
-
-static int context_override_def_count;
 
 int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
 {
@@ -213,10 +210,6 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     int                success;
 
     pa_assert(u);
-
-    /* Context override definitions must be last in the configuration
-     * file and no other types can be defined after! */
-    context_override_def_count = 0;
 
     if (!cfgfile)
         cfgfile = DEFAULT_CONFIG_FILE;
@@ -1471,14 +1464,6 @@ static int contextval_parse(int lineno,char *valdef, enum pa_classify_method *me
     return 0;
 }
 
-static int contextdef_valid(int lineno) {
-    if (context_override_def_count > 0) {
-        pa_log("invalid definition on line %d: context override definitions must be last!", lineno);
-        return 0;
-    } else
-        return 1;
-}
-
 static int contextsetprop_parse(int lineno, char *setpropdef,
                                 int *nact, struct ctxact **acts)
 {
@@ -1496,9 +1481,6 @@ static int contextsetprop_parse(int lineno, char *setpropdef,
     /*
      * sink-name@startswidth:alsa,property:foo,value@constant:bar
      */
-
-    if (!contextdef_valid(lineno))
-        return -1;
 
     size = sizeof(*act) * (*nact + 1);
     act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
@@ -1566,9 +1548,6 @@ static int contextdelprop_parse(int lineno, char *delpropdef,
      * sink-name@startswidth:alsa,property:foo
      */
 
-    if (!contextdef_valid(lineno))
-        return -1;
-
     size = sizeof(*act) * (*nact + 1);
     act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
 
@@ -1610,9 +1589,6 @@ static int contextsetdef_parse(int lineno, char *setdefdef,
     /*
      * activity-group:<active/inactive/state>
      */
-
-    if (!contextdef_valid(lineno))
-        return -1;
 
     size = sizeof(*act) * (*nact + 1);
     act  = (*acts = pa_xrealloc(*acts, size)) + *nact;
@@ -1714,8 +1690,6 @@ static int contextoverride_parse(int lineno, char *setoverridedef,
     setprop->valarg  = valarg ? pa_xstrdup(valarg) : NULL;
 
     (*nact)++;
-
-    context_override_def_count++;
 
     return 0;
 
