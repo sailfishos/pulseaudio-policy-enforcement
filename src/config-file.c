@@ -166,6 +166,7 @@ struct section {
 };
 
 
+static int parse_line(struct userdata *u, int lineno, char *buf, struct section *section, int *success);
 static int preprocess_buffer(int, char *, char *);
 
 static int section_header(int, char *, enum section_type *);
@@ -207,16 +208,8 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     char               ovrpath[PATH_MAX];
     char              *path;
     char               buf[BUFSIZE];
-    char               line[BUFSIZE];
     int                lineno;
-    enum section_type  newsect;
     struct section     section;
-    struct groupdef   *grdef;
-    struct devicedef  *devdef;
-    struct carddef    *carddef;
-    struct streamdef  *strdef;
-    struct contextdef *ctxdef;
-    struct activitydef *actdef;
     int                success;
 
     pa_assert(u);
@@ -247,77 +240,8 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     memset(&section, 0, sizeof(section));
 
     for (errno = 0, lineno = 1;  fgets(buf, BUFSIZE, f) != NULL;  lineno++) {
-        if (preprocess_buffer(lineno, buf, line) < 0)
+        if (!parse_line(u, lineno, buf, &section, &success))
             break;
-
-        if (*line == '\0')
-            continue;
-
-        if (section_header(lineno, line, &newsect)) {
-            if (section_close(u, &section) < 0)
-                success = false;
-
-            section.type = newsect;
-
-            if (section_open(u, newsect, &section) < 0)
-                success = false;
-        }
-        else {
-            switch (section.type) {
-
-            case section_group:
-                grdef = section.def.group;
-
-                if (groupdef_parse(lineno, line, grdef) < 0)
-                    success = false;
-
-                break;
-
-            case section_device:
-                devdef = section.def.device;
-
-                if (devicedef_parse(lineno, line, devdef) < 0)
-                    success = false;
-
-                break;
-
-            case section_card:
-                carddef = section.def.card;
-
-                if (carddef_parse(lineno, line, carddef) < 0)
-                    success = false;
-
-                break;
-
-            case section_stream:
-                strdef = section.def.stream;
-
-                if (streamdef_parse(lineno, line, strdef) < 0)
-                    success = false;
-                
-                break;
-
-            case section_context:
-                ctxdef = section.def.context;
-
-                if (contextdef_parse(lineno, line, ctxdef) < 0)
-                    success = false;
-
-                break;
-
-            case section_activity:
-                actdef = section.def.activity;
-
-                if (activitydef_parse(lineno, line, actdef) < 0)
-                    success = false;
-
-                break;
-
-            default:
-                break;
-
-            }
-        }
     }
 
     section_close(u, &section);
@@ -344,11 +268,10 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
     char             **overrides;
     int                noverride;
     char               buf[BUFSIZE];
-    char               line[BUFSIZE];
     int                lineno;
-    enum section_type  newsect;
     struct section     section;
     int                i;
+    int                success;
 
     pa_assert(u);
 
@@ -357,6 +280,7 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
 
     pa_log_info("policy config directory is '%s'", cfgdir);
 
+    success = 1;
     overrides = NULL;
     noverride = 0;
 
@@ -419,42 +343,9 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
             memset(&section, 0, sizeof(section));
 
             for (errno = 0, lineno = 1;  fgets(buf, BUFSIZE, f);   lineno++) {
-
-                if (preprocess_buffer(lineno, buf, line) < 0)
+                if (!parse_line(u, lineno, buf, &section, &success))
                     break;
-
-                if (*line == '\0')
-                    continue;
-
-                if (section_header(lineno, line, &newsect)) {
-                    section_close(u, &section);
-
-                    section.type = newsect;
-
-                    switch (section.type) {
-                        case section_stream:
-                        case section_device:
-                            section_open(u, newsect, &section);
-                            break;
-                        default:
-                            pa_log("line %d: only [stream] or [device] section is allowed",
-                                   lineno);
-                            break;
-                    }
-                }
-                else {
-                    switch (section.type) {
-                    case section_stream:
-                        streamdef_parse(lineno, line, section.def.stream);
-                        break;
-                    case section_device:
-                        devicedef_parse(lineno, line, section.def.device);
-                        break;
-                    default:
-                        break;
-                    }
-                }
-            } /* for fgets() */
+            }
 
             section_close(u, &section);
             endpwent();
@@ -476,7 +367,92 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
     pa_xfree(overrides);
 
 
-    return true;
+    return success;
+}
+
+static int parse_line(struct userdata *u, int lineno, char *buf, struct section *section, int *success) {
+    enum section_type   newsect;
+    struct groupdef    *grdef;
+    struct devicedef   *devdef;
+    struct carddef     *carddef;
+    struct streamdef   *strdef;
+    struct contextdef  *ctxdef;
+    struct activitydef *actdef;
+    char                line[BUFSIZE];
+
+    if (preprocess_buffer(lineno, buf, line) < 0)
+        return 0;
+
+    if (*line == '\0')
+        return 1;
+
+    if (section_header(lineno, line, &newsect)) {
+        if (section_close(u, section) < 0)
+            *success = 0;
+
+        section->type = newsect;
+
+        if (section_open(u, newsect, section) < 0)
+            *success = 0;
+    }
+    else {
+        switch (section->type) {
+
+        case section_group:
+            grdef = section->def.group;
+
+            if (groupdef_parse(lineno, line, grdef) < 0)
+                *success = 0;
+
+            break;
+
+        case section_device:
+            devdef = section->def.device;
+
+            if (devicedef_parse(lineno, line, devdef) < 0)
+                *success = 0;
+
+            break;
+
+        case section_card:
+            carddef = section->def.card;
+
+            if (carddef_parse(lineno, line, carddef) < 0)
+                *success = 0;
+
+            break;
+
+        case section_stream:
+            strdef = section->def.stream;
+
+            if (streamdef_parse(lineno, line, strdef) < 0)
+                *success = 0;
+
+            break;
+
+        case section_context:
+            ctxdef = section->def.context;
+
+            if (contextdef_parse(lineno, line, ctxdef) < 0)
+                *success = 0;
+
+            break;
+
+        case section_activity:
+            actdef = section->def.activity;
+
+            if (activitydef_parse(lineno, line, actdef) < 0)
+                *success = 0;
+
+            break;
+
+        default:
+            break;
+
+        }
+    }
+
+    return 1;
 }
 
 static int preprocess_buffer(int lineno, char *inbuf, char *outbuf)
