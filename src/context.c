@@ -443,8 +443,10 @@ struct pa_policy_context_variable *add_variable(struct pa_policy_context *ctx,
     {
         var = last->next;
 
-        if (!strcmp(name, var->name))
+        if (!strcmp(name, var->name)) {
+            pa_log_debug("updated context variable '%s'", var->name);
             return var;
+        }
     }
 
     var = pa_xmalloc0(sizeof(*var));
@@ -1219,8 +1221,10 @@ struct pa_policy_activity_variable *get_activity_variable(struct userdata *u, st
     {
         var = last->next;
 
-        if (!strcmp(device, var->device))
+        if (!strcmp(device, var->device)) {
+            pa_log_debug("updated context activity variable '%s'", var->device);
             return var;
+        }
     }
 
     var = pa_xmalloc0(sizeof(*var));
