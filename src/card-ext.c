@@ -78,29 +78,12 @@ const char *pa_card_ext_get_name(struct pa_card *card)
     return card->name ? card->name : "<unknown>";
 }
 
-char **pa_card_ext_get_profiles(struct pa_card *card)
+pa_hashmap *pa_card_ext_get_profiles(struct pa_card *card)
 {
-    pa_card_profile  *p;
-    char            **plist = NULL;
-    int               size;
-    void             *st;
-    int               l;
+    pa_assert(card);
+    pa_assert(card->profiles);
 
-    if (card->profiles) {
-        size = sizeof(char *) * (pa_hashmap_size(card->profiles) + 1);
-
-        plist = pa_xmalloc0(size);
-
-        for (l = 0, st = NULL;
-             (p = pa_hashmap_iterate(card->profiles,&st,NULL));
-             l++)
-        {
-            plist[l] = p->name;
-        }
-        
-    }
-
-    return plist;
+    return card->profiles;
 }
 
 int pa_card_ext_set_profile(struct userdata *u, char *type)
@@ -203,7 +186,7 @@ static void handle_new_card(struct userdata *u, struct pa_card *card)
     if (card && u) {
         name = pa_card_ext_get_name(card);
         idx  = card->index;
-        len  = pa_classify_card(u, card, 0,0, buf, sizeof(buf));
+        len  = pa_classify_card(u, card, 0,0, buf, sizeof(buf), false);
 
         pa_policy_context_register(u, pa_policy_object_card, name, card);
 
@@ -222,7 +205,7 @@ static void handle_new_card(struct userdata *u, struct pa_card *card)
                              name, idx, buf);
                 
                 len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                                       buf, sizeof(buf));
+                                       buf, sizeof(buf), true);
                 if (len > 0) {
                     pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
                 }
@@ -241,7 +224,7 @@ static void handle_removed_card(struct userdata *u, struct pa_card *card)
     if (card && u) {
         name = pa_card_ext_get_name(card);
         idx  = card->index;
-        len  = pa_classify_card(u, card, 0,0, buf, sizeof(buf));
+        len  = pa_classify_card(u, card, 0,0, buf, sizeof(buf), false);
 
         pa_policy_context_unregister(u, pa_policy_object_card, name, card,idx);
 
@@ -251,7 +234,7 @@ static void handle_removed_card(struct userdata *u, struct pa_card *card)
             pa_log_debug("remove card '%s' (idx=%d, type=%s)", name,idx, buf);
             
             len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                                   buf, sizeof(buf));
+                                   buf, sizeof(buf), false);
             if (len > 0) {
                 pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, buf);
             }

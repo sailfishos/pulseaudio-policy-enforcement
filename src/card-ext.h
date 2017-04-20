@@ -12,7 +12,7 @@ struct pa_card_evsubscr *pa_card_ext_subscription(struct userdata *);
 void pa_card_ext_subscription_free(struct pa_card_evsubscr *);
 void pa_card_ext_discover(struct userdata *);
 const char *pa_card_ext_get_name(struct pa_card *);
-char **pa_card_ext_get_profiles(struct pa_card *);
+pa_hashmap *pa_card_ext_get_profiles(struct pa_card *card);
 int pa_card_ext_set_profile(struct userdata *, char *);
 
 #endif

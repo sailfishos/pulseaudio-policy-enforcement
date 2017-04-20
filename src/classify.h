@@ -192,7 +192,7 @@ int   pa_classify_sink(struct userdata *, struct pa_sink *,
 int   pa_classify_source(struct userdata *, struct pa_source *,
                          uint32_t, uint32_t, char *, int);
 int   pa_classify_card(struct userdata *, struct pa_card *,
-                       uint32_t, uint32_t, char *, int);
+                       uint32_t, uint32_t, char *, int, bool);
 
 int   pa_classify_is_sink_typeof(struct userdata *, struct pa_sink *,
                                  const char *,
