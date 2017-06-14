@@ -6,6 +6,7 @@
 struct pa_card_evsubscr {
     pa_hook_slot    *put;
     pa_hook_slot    *unlink;
+    pa_hook_slot    *avail;
 };
 
 struct pa_card_evsubscr *pa_card_ext_subscription(struct userdata *);

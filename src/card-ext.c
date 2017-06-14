@@ -15,9 +15,11 @@
 /* hooks */
 static pa_hook_result_t card_put(void *, void *, void *);
 static pa_hook_result_t card_unlink(void *, void *, void *);
+static pa_hook_result_t card_avail(void *, void *, void *);
 
 static void handle_new_card(struct userdata *, struct pa_card *);
 static void handle_removed_card(struct userdata *, struct pa_card *);
+static void handle_card_profile_available_changed(struct userdata *u, pa_card *card);
 
 
 struct pa_card_evsubscr *pa_card_ext_subscription(struct userdata *u)
@@ -27,6 +29,7 @@ struct pa_card_evsubscr *pa_card_ext_subscription(struct userdata *u)
     struct pa_card_evsubscr *subscr;
     pa_hook_slot            *put;
     pa_hook_slot            *unlink;
+    pa_hook_slot            *avail;
 
     pa_assert(u);
     pa_assert_se((core = u->core));
@@ -37,12 +40,14 @@ struct pa_card_evsubscr *pa_card_ext_subscription(struct userdata *u)
                              PA_HOOK_LATE, card_put, (void *)u);
     unlink = pa_hook_connect(hooks + PA_CORE_HOOK_CARD_UNLINK,
                              PA_HOOK_LATE, card_unlink, (void *)u);
-    
+    avail  = pa_hook_connect(hooks + PA_CORE_HOOK_CARD_PROFILE_AVAILABLE_CHANGED,
+                             PA_HOOK_LATE, card_avail, u);
 
     subscr = pa_xnew0(struct pa_card_evsubscr, 1);
     
     subscr->put    = put;
     subscr->unlink = unlink;
+    subscr->avail  = avail;
 
     return subscr;
 
@@ -54,6 +59,7 @@ void pa_card_ext_subscription_free(struct pa_card_evsubscr *subscr)
     if (subscr != NULL) {
         pa_hook_slot_free(subscr->put);
         pa_hook_slot_free(subscr->unlink);
+        pa_hook_slot_free(subscr->avail);
 
         pa_xfree(subscr);
     }
@@ -174,6 +180,16 @@ static pa_hook_result_t card_unlink(void *hook_data, void *call_data,
     return PA_HOOK_OK;
 }
 
+static pa_hook_result_t card_avail(void *hook_data, void *call_data,
+                                   void *slot_data)
+{
+    pa_card_profile *cp = (pa_card_profile *) call_data;
+    struct userdata *u  = (struct userdata *) slot_data;
+
+    handle_card_profile_available_changed(u, cp->card);
+
+    return PA_HOOK_OK;
+}
 
 static void handle_new_card(struct userdata *u, struct pa_card *card)
 {
@@ -242,6 +258,17 @@ static void handle_removed_card(struct userdata *u, struct pa_card *card)
     }
 }
 
+static void handle_card_profile_available_changed(struct userdata *u, pa_card *card)
+{
+    char      buf[1024];
+    int       len;
+
+    len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
+                           buf, sizeof(buf), true);
+    if (len > 0) {
+        pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+    }
+}
 
 
 /*
