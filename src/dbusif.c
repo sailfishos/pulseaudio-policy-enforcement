@@ -18,6 +18,7 @@
 #include "source-ext.h"
 #include "card-ext.h"
 #include "sink-input-ext.h"
+#include "policy.h"
 
 #define ADMIN_DBUS_MANAGER          "org.freedesktop.DBus"
 #define ADMIN_DBUS_PATH             "/org/freedesktop/DBus"
