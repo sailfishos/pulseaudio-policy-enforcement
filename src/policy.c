@@ -79,7 +79,7 @@ void pa_policy_send_device_state_full(struct userdata *u)
 
     while ((card = pa_idxset_iterate(idxset, &state, NULL))) {
         len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                               buf, sizeof(buf));
+                               buf, sizeof(buf), true);
         if (len > 0)
             pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
     }

@@ -1140,6 +1140,7 @@ static void fire_object_property_changed_hook(struct pa_policy_object *object)
     struct pa_source        *src;
     struct pa_sink_input    *sinp;
     struct pa_source_output *sout;
+    struct pa_module        *module;
 
    switch (object->type) {
 
@@ -1165,6 +1166,12 @@ static void fire_object_property_changed_hook(struct pa_policy_object *object)
         sout = object->ptr;
         core = sout->core;
         hook = PA_CORE_HOOK_SOURCE_OUTPUT_PROPLIST_CHANGED;
+        break;
+
+    case pa_policy_object_module:
+        module = object->ptr;
+        core = module->core;
+        hook = PA_CORE_HOOK_MODULE_PROPLIST_CHANGED;
         break;
         
     default:
