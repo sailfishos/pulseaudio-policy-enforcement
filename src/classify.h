@@ -213,7 +213,8 @@ int pa_classify_is_port_source_typeof(struct userdata *, struct pa_source *,
                                       const char *,
                                       struct pa_classify_device_data **);
 
-int pa_classify_update_module(struct userdata *u, uint32_t type, struct pa_classify_device_data *device);
+int pa_classify_update_module(struct userdata *u, uint32_t dir, struct pa_classify_device_data *device);
+void pa_classify_update_modules(struct userdata *u, uint32_t dir, const char *type);
 
 const char *pa_classify_method_str(enum pa_classify_method method);
 int   pa_classify_method_equals(const char *, union pa_classify_arg *);

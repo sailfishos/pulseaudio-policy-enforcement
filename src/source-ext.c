@@ -132,6 +132,8 @@ int pa_source_ext_set_ports(struct userdata *u, const char *type)
     pa_assert(u);
     pa_assert(u->core);
 
+    pa_classify_update_modules(u, PA_POLICY_MODULE_FOR_SOURCE, type);
+
     PA_IDXSET_FOREACH(source, u->core->sources, idx) {
         /* Check whether the port of this source should be changed. */
         if (pa_classify_is_port_source_typeof(u, source, type, &data)) {

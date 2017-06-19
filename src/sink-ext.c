@@ -245,6 +245,8 @@ int pa_sink_ext_set_ports(struct userdata *u, const char *type)
 
     set_port_start(u);
 
+    pa_classify_update_modules(u, PA_POLICY_MODULE_FOR_SINK, type);
+
     PA_IDXSET_FOREACH(sink, u->core->sinks, idx) {
         /* Check whether the port of this sink should be changed. */
         if (pa_classify_is_port_sink_typeof(u, sink, type, &data)) {
