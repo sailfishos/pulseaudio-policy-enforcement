@@ -493,54 +493,123 @@ int pa_classify_is_port_source_typeof(struct userdata *u,
 }
 
 
+static int classify_update_module_load(struct userdata *u,
+                                       uint32_t dir,
+                                       struct pa_classify_module *m,
+                                       struct pa_classify_device_data *devdata) {
+    pa_assert(u);
+    pa_assert(m);
+    pa_assert(devdata);
+    pa_assert(!m->module);
+
+    pa_log_debug("Load module for %s: %s %s", dir == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
+                                              devdata->module,
+                                              devdata->module_args ? devdata->module_args : "");
+
+    m->module = pa_module_load(u->core,
+                               devdata->module,
+                               devdata->module_args);
+    if (!m->module) {
+        pa_log("Failed to load %s", devdata->module);
+        return -1;
+    }
+
+    m->module_name = devdata->module;
+    m->module_args = devdata->module_args;
+    m->flags = devdata->flags;
+
+    return 0;
+}
+
+
+static void classify_update_module_unload(struct userdata *u,
+                                          uint32_t dir,
+                                          struct pa_classify_module *m) {
+    pa_assert(u);
+    pa_assert(m);
+    pa_assert(m->module);
+
+    pa_log_debug("Unload %smodule for %s: %s",
+                 m->flags & PA_POLICY_MODULE_UNLOAD_IMMEDIATELY ? "" : "request for ",
+                 dir == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
+                 m->module_name);
+
+    if (m->flags & PA_POLICY_MODULE_UNLOAD_IMMEDIATELY)
+        unload_module(m->module);
+    else
+        pa_module_unload_request(m->module, true);
+
+    m->module_name = NULL;
+    m->module_args = NULL;
+    m->module = NULL;
+}
 
 
 int pa_classify_update_module(struct userdata *u,
-                              uint32_t type,
+                              uint32_t dir,
                               struct pa_classify_device_data *devdata) {
     struct pa_classify_module *m;
+    int ret = 0;
 
     pa_assert(u);
     pa_assert(devdata);
-    pa_assert(type < PA_POLICY_MODULE_COUNT);
+    pa_assert(dir < PA_POLICY_MODULE_COUNT);
 
-    m = &u->classify->module[type];
+    m = &u->classify->module[dir];
 
     if (m->module &&
         !pa_safe_streq(m->module_name, devdata->module) &&
-        !pa_safe_streq(m->module_args, devdata->module_args)) {
+        !pa_safe_streq(m->module_args, devdata->module_args))
+        classify_update_module_unload(u, dir, m);
 
-        pa_log_debug("Unload %smodule for %s: %s",
-                     m->flags & PA_POLICY_MODULE_UNLOAD_IMMEDIATELY ? "" : "request for ",
-                     type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
-                     m->module_name);
-        if (m->flags & PA_POLICY_MODULE_UNLOAD_IMMEDIATELY)
-            unload_module(m->module);
-        else
-            pa_module_unload_request(m->module, true);
-        m->module_name = NULL;
-        m->module_args = NULL;
-        m->module = NULL;
-    }
+    if (devdata->module && !m->module)
+        ret = classify_update_module_load(u, dir, m, devdata);
 
-    if (devdata->module && !m->module) {
-        pa_log_debug("Load module for %s: %s %s", type == PA_POLICY_MODULE_FOR_SINK ? "sink" : "source",
-                                                  devdata->module,
-                                                  devdata->module_args ? devdata->module_args : "");
-        m->module = pa_module_load(u->core,
-                                   devdata->module,
-                                   devdata->module_args);
-        if (!m->module) {
-            pa_log("Failed to load %s", devdata->module);
-            return -1;
+    return ret;
+}
+
+
+void pa_classify_update_modules(struct userdata *u, uint32_t dir, const char *type) {
+    struct pa_classify_device_def *defs;
+    struct pa_classify_device_def *d;
+    struct pa_classify_device_def *new_def = NULL;
+    struct pa_classify_module *m;
+    bool need_to_unload = true;
+
+    pa_assert(u);
+    pa_assert(u->classify);
+    pa_assert(u->classify->sources);
+    pa_assert_se((defs = u->classify->sources->defs));
+
+    m = &u->classify->module[dir];
+
+    if (!m->module)
+        return;
+
+    for (d = defs;  d->type;  d++) {
+        if (pa_streq(type, d->type)) {
+            new_def = d;
+            break;
         }
-
-        m->module_name = devdata->module;
-        m->module_args = devdata->module_args;
-        m->flags = devdata->flags;
     }
 
-    return 0;
+    if (!new_def)
+        return;
+
+    for (d = defs;  d->type;  d++) {
+        if (!pa_streq(type, d->type)) {
+            if (d->data.module) {
+                if (pa_safe_streq(m->module_name, new_def->data.module) &&
+                    pa_safe_streq(m->module_args, new_def->data.module_args)) {
+                    need_to_unload = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (need_to_unload)
+        classify_update_module_unload(u, dir, m);
 }
 
 
