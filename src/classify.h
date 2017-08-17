@@ -153,6 +153,10 @@ struct pa_classify {
     pa_hook_slot                *module_unlink_hook_slot;
 };
 
+struct pa_classify_result {
+    uint32_t    count;
+    const char *types[1];
+};
 
 struct pa_classify *pa_classify_new(struct userdata *);
 void  pa_classify_free(struct userdata *u);
@@ -188,11 +192,11 @@ const char *pa_classify_source_output_by_data(struct userdata *u,
                                         struct pa_source_output_new_data *data);
 
 int   pa_classify_sink(struct userdata *, struct pa_sink *,
-                       uint32_t, uint32_t, char *, int);
+                       uint32_t, uint32_t, struct pa_classify_result **result);
 int   pa_classify_source(struct userdata *, struct pa_source *,
-                         uint32_t, uint32_t, char *, int);
+                         uint32_t, uint32_t, struct pa_classify_result **result);
 int   pa_classify_card(struct userdata *, struct pa_card *,
-                       uint32_t, uint32_t, char *, int, bool);
+                       uint32_t, uint32_t, bool, struct pa_classify_result **result);
 
 int   pa_classify_is_sink_typeof(struct userdata *, struct pa_sink *,
                                  const char *,
