@@ -1843,6 +1843,8 @@ static int flags_parse(int lineno, char  *flagdef,
             flags |= PA_POLICY_LOCAL_MUTE;
         else if (stream && !strcmp(flagname, "max_volume"))
             flags |= PA_POLICY_LOCAL_VOLMAX;
+        else if (card && !strcmp(flagname, "notify_profile_changed"))
+            flags |= PA_POLICY_NOTIFY_PROFILE_CHANGED;
         else {
             pa_log("invalid flag '%s' in line %d", flagname, lineno);
             return -1;

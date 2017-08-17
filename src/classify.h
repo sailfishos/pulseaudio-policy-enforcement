@@ -11,7 +11,8 @@
 #define PA_POLICY_PID_HASH_MASK  (PA_POLICY_PID_HASH_MAX - 1)
 
 /* card flags */
-#define PA_POLICY_DISABLE_NOTIFY (1UL << 0)
+#define PA_POLICY_DISABLE_NOTIFY            (1UL << 0)
+#define PA_POLICY_NOTIFY_PROFILE_CHANGED    (1UL << 1)
 
 /* stream flags */
 #define PA_POLICY_LOCAL_ROUTE    (1UL << 0)
