@@ -10,6 +10,7 @@
 #include "classify.h"
 #include "context.h"
 #include "policy.h"
+#include "log.h"
 
 
 /* hooks */
@@ -193,40 +194,40 @@ static pa_hook_result_t card_avail(void *hook_data, void *call_data,
 
 static void handle_new_card(struct userdata *u, struct pa_card *card)
 {
-    const char *name;
-    uint32_t  idx;
-    char      buf[1024];
-    int       len;
-    int       ret;
+    struct pa_classify_result  *r;
+    const char                 *name;
+    uint32_t                    idx;
+    int                         ret;
+    char                       *buf;
 
     if (card && u) {
         name = pa_card_ext_get_name(card);
         idx  = card->index;
-        len  = pa_classify_card(u, card, 0,0, buf, sizeof(buf), false);
 
         pa_policy_context_register(u, pa_policy_object_card, name, card);
 
-        if (len <= 0)
-            pa_log_debug("new card '%s' (idx=%d)", name, idx);
-        else {
+        if (pa_policy_log_level_debug()) {
+            pa_classify_card(u, card, 0,0, false, &r);
+            buf = pa_policy_log_concat(r->types, r->count);
+
+            /* we don't usually need to save the type list to card property list
+             * as it is not used for anything else than debugging. */
             ret = pa_proplist_sets(card->proplist,
                                    PA_PROP_POLICY_CARDTYPELIST, buf);
-
             if (ret < 0) {
                 pa_log("failed to set property '%s' on card '%s'",
                        PA_PROP_POLICY_DEVTYPELIST, name);
             }
-            else {
-                pa_log_debug("new card '%s' (idx=%d) (type %s)",
-                             name, idx, buf);
-                
-                len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                                       buf, sizeof(buf), true);
-                if (len > 0) {
-                    pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
-                }
-            }
+
+            pa_log_debug("new card '%s' (idx=%d%s%s)",
+                         name, idx, r->count > 0 ? ", type=" : "", buf);
+            pa_xfree(buf);
+            pa_xfree(r);
         }
+
+        pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0, true, &r);
+        pa_policy_send_device_state(u, PA_POLICY_CONNECTED, r);
+        pa_xfree(r);
     }
 }
 
@@ -234,40 +235,37 @@ static void handle_removed_card(struct userdata *u, struct pa_card *card)
 {
     const char *name;
     uint32_t  idx;
-    char      buf[1024];
-    int       len;
+    struct pa_classify_result *r;
+    char *buf;
 
     if (card && u) {
         name = pa_card_ext_get_name(card);
         idx  = card->index;
-        len  = pa_classify_card(u, card, 0,0, buf, sizeof(buf), false);
 
-        pa_policy_context_unregister(u, pa_policy_object_card, name, card,idx);
+        pa_policy_context_unregister(u, pa_policy_object_card, name, card, idx);
 
-        if (len <= 0)
-            pa_log_debug("remove card '%s' (idx=%d)", name, idx);
-        else {
-            pa_log_debug("remove card '%s' (idx=%d, type=%s)", name,idx, buf);
-            
-            len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                                   buf, sizeof(buf), false);
-            if (len > 0) {
-                pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, buf);
-            }
+        if (pa_policy_log_level_debug()) {
+            pa_classify_card(u, card, 0, 0, false, &r);
+            buf = pa_policy_log_concat(r->types, r->count);
+            pa_log_debug("remove card '%s' (idx=%d%s%s)",
+                         name, idx, r->count > 0 ? ", type=" : "", buf);
+            pa_xfree(buf);
+            pa_xfree(r);
         }
+
+        pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0, false, &r);
+        pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, r);
+        pa_xfree(r);
     }
 }
 
 static void handle_card_profile_available_changed(struct userdata *u, pa_card *card)
 {
-    char      buf[1024];
-    int       len;
+    struct pa_classify_result *r;
 
-    len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                           buf, sizeof(buf), true);
-    if (len > 0) {
-        pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
-    }
+    pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0, true, &r);
+    pa_policy_send_device_state(u, PA_POLICY_CONNECTED, r);
+    pa_xfree(r);
 }
 
 
