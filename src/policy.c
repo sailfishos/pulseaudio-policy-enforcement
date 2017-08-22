@@ -12,51 +12,12 @@
 #include "policy.h"
 #include "dbusif.h"
 #include "classify.h"
+#include "log.h"
 
 void pa_policy_send_device_state(struct userdata *u, const char *state,
-                                 char *typelist)
+                                 const struct pa_classify_result *list)
 {
-#define MAX_TYPE 256
-
-    const char *types[MAX_TYPE];
-    int   ntype;
-    char  buf[1024];
-    char *p, *q, c;
-
-    if (typelist && typelist[0]) {
-
-        ntype = 0;
-
-        p = typelist - 1;
-        q = buf;
-
-        do {
-            p++;
-
-            if (ntype < MAX_TYPE)
-                types[ntype] = q;
-            else {
-                pa_log("%s() list overflow", __FUNCTION__);
-                return;
-            }
-
-            while ((c = *p) != ' ' && c != '\0') {
-                if (q < buf + sizeof(buf)-1)
-                    *q++ = *p++;
-                else {
-                    pa_log("%s() buffer overflow", __FUNCTION__);
-                    return;
-                }
-            }
-            *q++ = '\0';
-            ntype++;
-
-        } while (*p);
-
-        pa_policy_dbusif_send_device_state(u, state, types, ntype);
-    }
-
-#undef MAX_TYPE
+    pa_policy_dbusif_send_device_state(u, state, list);
 }
 
 void pa_policy_send_device_state_full(struct userdata *u)
@@ -66,9 +27,7 @@ void pa_policy_send_device_state_full(struct userdata *u)
     struct pa_card   *card;
     struct pa_sink   *sink;
     struct pa_source *source;
-    const char       *typelist;
-    char              buf[1024];
-    int               len;
+    struct pa_classify_result *r;
 
     pa_assert(u);
     pa_assert(u->core);
@@ -78,10 +37,10 @@ void pa_policy_send_device_state_full(struct userdata *u)
     state = NULL;
 
     while ((card = pa_idxset_iterate(idxset, &state, NULL))) {
-        len = pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
-                               buf, sizeof(buf), true);
-        if (len > 0)
-            pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+        pa_classify_card(u, card, PA_POLICY_DISABLE_NOTIFY, 0,
+                         true, &r);
+        pa_policy_dbusif_send_device_state(u, PA_POLICY_CONNECTED, r);
+        pa_xfree(r);
     }
 
     /* sinks */
@@ -89,10 +48,9 @@ void pa_policy_send_device_state_full(struct userdata *u)
     state = NULL;
 
     while ((sink = pa_idxset_iterate(idxset, &state, NULL))) {
-        len = pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY, 0,
-                               buf, sizeof(buf));
-        if (len > 0)
-            pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+        pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY, 0, &r);
+        pa_policy_dbusif_send_device_state(u, PA_POLICY_CONNECTED, r);
+        pa_xfree(r);
     }
 
     /* sources */
@@ -100,9 +58,8 @@ void pa_policy_send_device_state_full(struct userdata *u)
     state = NULL;
 
     while ((source = pa_idxset_iterate(idxset, &state, NULL))) {
-        len = pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0,
-                                 buf, sizeof(buf));
-        if (len > 0)
-            pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
+        pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0, &r);
+        pa_policy_dbusif_send_device_state(u, PA_POLICY_CONNECTED, r);
+        pa_xfree(r);
     }
 }
