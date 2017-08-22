@@ -285,7 +285,7 @@ void pa_policy_dbusif_done(struct userdata *u)
 }
 
 void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
-                                        const char **types, int ntype)
+                                        const struct pa_classify_result *list)
 {
     const char              *path = "/com/nokia/policy/info";
 
@@ -294,10 +294,10 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
     DBusMessage             *msg;
     DBusMessageIter          mit;
     DBusMessageIter          dit;
-    int                      i;
+    uint32_t                 i;
     int                      sts;
 
-    if (!types || ntype < 1)
+    if (!list || list->count == 0)
         return;
 
     msg = dbus_message_new_signal(path, dbusif->ifnam, "info");
@@ -315,8 +315,8 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
         goto fail;
     }
 
-    for (i = 0; i < ntype; i++) {
-        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING,&types[i])){
+    for (i = 0; i < list->count; i++) {
+        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING, &list->types[i])) {
             pa_log("failed to build info message");
             goto fail;
         }
