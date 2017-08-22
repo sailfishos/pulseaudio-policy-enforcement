@@ -18,6 +18,7 @@
 #include "policy-group.h"
 #include "dbusif.h"
 #include "policy.h"
+#include "log.h"
 
 /* hooks */
 static pa_hook_result_t source_put(void *, void *, void *);
@@ -202,43 +203,39 @@ static void handle_new_source(struct userdata *u, struct pa_source *source)
 {
     const char      *name;
     uint32_t         idx;
-    char             buf[1024];
-    int              len;
+    char            *buf;
     int              ret;
+    struct pa_classify_result *r;
 
     if (source && u) {
         name = pa_source_ext_get_name(source);
         idx  = source->index;
-        len  = pa_classify_source(u, source, 0,0, buf, sizeof(buf));
 
-
-        if (len <= 0)
-                pa_log_debug("new source '%s' (idx=%d)", name, idx);
-        else {
+        if (pa_policy_log_level_debug()) {
+            pa_classify_source(u, source, 0, 0, &r);
+            buf = pa_policy_log_concat(r->types, r->count);
             ret = pa_proplist_sets(source->proplist,
                                    PA_PROP_POLICY_DEVTYPELIST, buf);
 
-            pa_policy_context_register(u,pa_policy_object_source,name,source);
-
-            if (ret < 0) {
+            if (ret < 0)
                 pa_log("failed to set property '%s' on source '%s'",
                        PA_PROP_POLICY_DEVTYPELIST, name);
-            }
-            else {
-                pa_log_debug("new source '%s' (idx=%d type %s)",
-                             name, idx, buf);
-#if 0
-                pa_policy_groupset_update_default_source(u, PA_IDXSET_INVALID);
-#endif
-                pa_policy_groupset_register_source(u, source);
 
-                len = pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY,0,
-                                         buf, sizeof(buf));
-                if (len > 0) {
-                    pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
-                }
-            }
+            pa_log_debug("new source '%s' (idx=%d%s%s)",
+                         name, idx, r->count > 0 ? ", type=" : "", buf);
+            pa_xfree(buf);
+            pa_xfree(r);
         }
+
+        pa_policy_context_register(u,pa_policy_object_source,name,source);
+#if 0
+        pa_policy_groupset_update_default_source(u, PA_IDXSET_INVALID);
+#endif
+        pa_policy_groupset_register_source(u, source);
+
+        pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0, &r);
+        pa_policy_send_device_state(u, PA_POLICY_CONNECTED, r);
+        pa_xfree(r);
     }
 }
 
@@ -246,33 +243,33 @@ static void handle_removed_source(struct userdata *u, struct pa_source *source)
 {
     const char      *name;
     uint32_t         idx;
-    char             buf[1024];
-    int              len;
+    char            *buf;
+    struct pa_classify_result *r;
 
     if (source && u) {
         name = pa_source_ext_get_name(source);
         idx  = source->index;
-        len  = pa_classify_source(u, source, 0,0, buf, sizeof(buf));
 
         pa_policy_context_unregister(u, pa_policy_object_source,
                                      name, source, idx);
 
-        if (len <= 0)
-            pa_log_debug("remove source '%s' (idx=%d)", name, idx);
-        else {
-            pa_log_debug("remove source '%s' (idx=%d, type=%s)", name,idx,buf);
-            
-#if 0
-            pa_policy_groupset_update_default_source(u, idx);
-#endif
-            pa_policy_groupset_unregister_source(u, idx);
-
-            len = pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY,0,
-                                     buf, sizeof(buf));
-            if (len > 0) {
-                pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, buf);
-            }
+        if (pa_policy_log_level_debug()) {
+            pa_classify_source(u, source, 0, 0, &r);
+            buf = pa_policy_log_concat(r->types, r->count);
+            pa_log_debug("remove source '%s' (idx=%d%s%s)",
+                         name, idx, r->count > 0 ? ", type=" : "", buf);
+            pa_xfree(buf);
+            pa_xfree(r);
         }
+
+#if 0
+        pa_policy_groupset_update_default_source(u, idx);
+#endif
+        pa_policy_groupset_unregister_source(u, idx);
+
+        pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0, &r);
+        pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, r);
+        pa_xfree(r);
     }
 }
 
