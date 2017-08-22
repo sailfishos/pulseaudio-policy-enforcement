@@ -29,6 +29,7 @@
 #include <meego/shared-data.h>
 
 #include "module-policy-enforcement-symdef.h"
+#include "log.h"
 #include "userdata.h"
 #include "index-hash.h"
 #include "config-file.h"
@@ -61,7 +62,8 @@ PA_MODULE_USAGE(
     "null_sink_name=<name of the null sink> "
     "othermedia_preemption=<on|off> "
     "route_sources_first=<true|false> Default false "
-    "configdir=<configuration directory>"
+    "configdir=<configuration directory> "
+    "debug=<true|false> Default false"
 );
 
 static const char* const valid_modargs[] = {
@@ -74,6 +76,7 @@ static const char* const valid_modargs[] = {
     "othermedia_preemption",
     "route_sources_first",
     "configdir",
+    "debug",
     NULL
 };
 
@@ -90,6 +93,7 @@ int pa__init(pa_module *m) {
     const char      *preempt;
     bool             route_sources_first = false;
     const char      *cfgdir;
+    bool             debug = false;
     
     pa_assert(m);
     
@@ -111,6 +115,13 @@ int pa__init(pa_module *m) {
         pa_log("Failed to parse \"route_sources_first\" parameter.");
         goto fail;
     }
+
+    if (pa_modargs_get_value_boolean(ma, "debug", &debug) < 0) {
+        pa_log("Failed to parse \"debug\" parameter.");
+        goto fail;
+    }
+
+    pa_policy_log_init(debug);
 
     u = pa_xnew0(struct userdata, 1);
     m->userdata = u;
