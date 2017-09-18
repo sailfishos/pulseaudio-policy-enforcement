@@ -933,7 +933,7 @@ static void streams_free(struct pa_classify_stream_def *defs)
         if (stream->method == pa_classify_method_matches)
             regfree(&stream->arg.rexp);
         else
-            pa_xfree((void *)stream->arg.string);
+            pa_xfree(stream->arg.string);
 
         pa_xfree(stream->prop);
         pa_xfree(stream->exe);
@@ -1140,7 +1140,7 @@ static void devices_free(struct pa_classify_device *devices)
 
     if (devices) {
         for (d = devices->defs;  d->type;  d++) {
-            pa_xfree((void *)d->type);
+            pa_xfree(d->type);
 
             if (d->data.ports)
                 pa_hashmap_free(d->data.ports);
@@ -1148,7 +1148,7 @@ static void devices_free(struct pa_classify_device *devices)
             if (d->method == pa_classify_method_matches)
                 regfree(&d->arg.rexp);
             else
-                pa_xfree((void *)d->arg.string);
+                pa_xfree(d->arg.string);
 
             pa_xfree(d->data.module);
             pa_xfree(d->data.module_args);
@@ -1327,15 +1327,15 @@ static void cards_free(struct pa_classify_card *cards)
     if (cards) {
         for (d = cards->defs;  d->type;  d++) {
 
-            pa_xfree((void *)d->type);
+            pa_xfree(d->type);
 
             for (i = 0; i < 2; i++) {
-                pa_xfree((void *)d->data[i].profile);
+                pa_xfree(d->data[i].profile);
 
                 if (d->data[i].method == pa_classify_method_matches)
                     regfree(&d->data[i].arg.rexp);
                 else
-                    pa_xfree((void *)d->data[i].arg.string);
+                    pa_xfree(d->data[i].arg.string);
             }
         }
 

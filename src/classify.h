@@ -48,7 +48,7 @@ enum pa_classify_method {
 };
 
 union pa_classify_arg {
-    const char *string;
+    char       *string;
     regex_t     rexp;
 };
 
@@ -107,7 +107,7 @@ struct pa_classify_device_data {
 };
 
 struct pa_classify_device_def {
-    const char                      *type;  /* device type, e.g. ihf */
+    char                            *type;  /* device type, e.g. ihf */
                                             /* for classification */
     char                            *prop;  /*   sink/source property */
     int                            (*method)(const char *,
@@ -129,7 +129,7 @@ struct pa_classify_card_data {
 };
 
 struct pa_classify_card_def {
-    const char                  *type; /* handled device name, e.g ihf */
+    char                        *type;    /* handled device name, e.g ihf */
     struct pa_classify_card_data data[2]; /* data associated with device 'type' */
 };
 
