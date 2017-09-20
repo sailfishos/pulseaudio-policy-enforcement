@@ -40,6 +40,7 @@ enum section_type {
     section_stream,
     section_context,
     section_activity,
+    section_variable,
     section_max
 };
 
@@ -179,6 +180,7 @@ static int carddef_parse(int, char *, struct carddef *);
 static int streamdef_parse(int, char *, struct streamdef *);
 static int contextdef_parse(int, char *, struct contextdef *);
 static int activitydef_parse(int, char *, struct activitydef *);
+static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_value);
 
 static int deviceprop_parse(int, enum device_class,char *,struct devicedef *);
 static int ports_parse(int, const char *, struct devicedef *);
@@ -439,6 +441,20 @@ static int parse_line(struct userdata *u, int lineno, char *buf, struct section 
 
             break;
 
+        case section_variable: {
+            char *var;
+            char *value;
+
+            if (variabledef_parse(lineno, line, &var, &value) < 0)
+                *success = 0;
+            else {
+                pa_xfree(var);
+                pa_xfree(value);
+            }
+
+            break;
+        }
+
         default:
             break;
 
@@ -506,6 +522,8 @@ static int section_header(int lineno, char *line, enum section_type *type)
             *type = section_context;
         else if (!strcmp(line, "[activity]"))
             *type = section_activity;
+        else if (!strcmp(line, "[variable]"))
+            *type = section_variable;
         else {
             *type = section_unknown;
             pa_log("Invalid section type '%s' in line %d", line, lineno);
@@ -555,6 +573,10 @@ static int section_open(struct userdata *u, enum section_type type,
         case section_activity:
             sec->def.activity = pa_xnew0(struct activitydef, 1);
             sec->def.activity->method = pa_method_true;
+            status = 0;
+            break;
+
+        case section_variable:
             status = 0;
             break;
 
@@ -871,6 +893,10 @@ static int section_close(struct userdata *u, struct section *sec)
             pa_xfree(actdef->inactive_acts);
             pa_xfree(actdef);
 
+            break;
+
+        case section_variable:
+            status = 1;
             break;
 
         default:
@@ -1239,6 +1265,33 @@ static int activitydef_parse(int lineno, char *line, struct activitydef *actdef)
                 pa_log("invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
+        }
+    }
+
+    return sts;
+}
+
+static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_value)
+{
+    int sts;
+    char *var;
+    char *value;
+
+    if (ret_var == NULL || ret_value == NULL)
+        sts = -1;
+    else {
+        sts = 0;
+
+        if ((value = strchr(line, '=')) == NULL ||
+             strlen(value) < 2) {
+            pa_log("invalid definition '%s' in line %d", line, lineno);
+            sts = -1;
+        } else {
+            var = line;
+            value[0] = '\0';
+            value = value + 1;
+            *ret_var = pa_sprintf_malloc("$%s", var);
+            *ret_value = pa_xstrdup(value);
         }
     }
 
