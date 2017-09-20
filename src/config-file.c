@@ -245,7 +245,6 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     }
 
     section_close(u, &section);
-    endpwent();
 
     if (fclose(f) != 0) {
         pa_log("Can't close config file '%s': %s", path, strerror(errno));
@@ -348,7 +347,6 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
             }
 
             section_close(u, &section);
-            endpwent();
 
             if (fclose(f) != 0) {
                 pa_log("Can't close config file '%s': %s",
@@ -1165,6 +1163,8 @@ static int streamdef_parse(int lineno, char *line, struct streamdef *strdef)
                     pa_log("invalid user '%s' in line %d", user, lineno);
                     sts = -1;
                 }
+
+                endpwent();
             }
 
             strdef->uid = (uid_t) uid;
