@@ -22,18 +22,20 @@
 #endif
 
 #include <pulsecore/core-util.h>
+#include <pulsecore/llist.h>
 #include <pulsecore/log.h>
 
 #include "config-file.h"
 #include "policy-group.h"
 #include "classify.h"
 #include "context.h"
+#include "variable.h"
 
 #ifndef PA_DEFAULT_CONFIG_DIR
 #define PA_DEFAULT_CONFIG_DIR "/etc/pulse"
 #endif
 
-#define DEFAULT_CONFIG_FILE        "policy.conf"
+#define DEFAULT_CONFIG_FILE        "xpolicy.conf"
 #define DEFAULT_CONFIG_DIRECTORY   "/etc/pulse/xpolicy.conf.d"
 
 enum section_type {
@@ -168,15 +170,22 @@ struct section {
         struct contextdef *context;
         struct activitydef *activity;
     }                        def;
+
+    PA_LLIST_FIELDS(struct section);
+};
+
+struct sections {
+    PA_LLIST_HEAD(struct section, sec);
 };
 
 
-static int parse_line(struct userdata *u, int lineno, char *buf, struct section *section, int *success);
+static int parse_line(struct userdata *u, int lineno, char *buf, struct sections *sections, int *success);
 static int preprocess_buffer(int, char *, char *);
 
 static int section_header(int, char *, enum section_type *);
 static int section_open(struct userdata *, enum section_type,struct section *);
 static int section_close(struct userdata *, struct section *);
+static int section_close_all(struct userdata *u, struct sections *sections);
 
 static int groupdef_parse(int, char *, struct groupdef *);
 static int devicedef_parse(int, char *, struct devicedef *);
@@ -203,7 +212,29 @@ const char *policy_file_path(const char *file, char *buf, size_t len);
 
 static char **split_strv(const char *s, const char *delimiter);
 
-int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
+static int policy_parse_config_file(struct userdata *u, const char *cfgfile, struct sections *sections);
+static int policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir, struct sections *sections);
+
+int pa_policy_parse_config_files(struct userdata *u, const char *cfgfile, const char *cfgdir)
+{
+    struct sections sections;
+    int             ret;
+
+    memset(&sections, 0, sizeof(sections));
+    PA_LLIST_HEAD_INIT(struct section, sections.sec);
+
+    ret = policy_parse_config_file(u, cfgfile, &sections);
+    if (ret)
+        ret = policy_parse_files_in_configdir(u, cfgdir, &sections);
+    if (ret)
+        ret = section_close_all(u, &sections);
+    if (ret)
+        pa_log_debug("all configs parsed");
+
+    return ret;
+}
+
+int policy_parse_config_file(struct userdata *u, const char *cfgfile, struct sections *sections)
 {
 #define BUFSIZE 512
 
@@ -213,7 +244,6 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     char              *path;
     char               buf[BUFSIZE];
     int                lineno;
-    struct section     section;
     int                success;
 
     pa_assert(u);
@@ -237,14 +267,10 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
 
     success = true;                    /* assume successful operation */
 
-    memset(&section, 0, sizeof(section));
-
     for (errno = 0, lineno = 1;  fgets(buf, BUFSIZE, f) != NULL;  lineno++) {
-        if (!parse_line(u, lineno, buf, &section, &success))
+        if (!parse_line(u, lineno, buf, sections, &success))
             break;
     }
-
-    section_close(u, &section);
 
     if (fclose(f) != 0) {
         pa_log("Can't close config file '%s': %s", path, strerror(errno));
@@ -253,10 +279,11 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     return success;
 }
 
-int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
+int policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir, struct sections *sections)
 {
 #define BUFSIZE 512
 
+    pa_dynarray       *files = NULL;
     DIR               *d;
     FILE              *f;
     struct dirent     *e;
@@ -265,11 +292,10 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
     int                l;
     char               cfgpath[PATH_MAX];
     char             **overrides;
-    int                noverride;
+    unsigned           noverride;
     char               buf[BUFSIZE];
     int                lineno;
-    struct section     section;
-    int                i;
+    unsigned           i, j;
     int                success;
 
     pa_assert(u);
@@ -302,13 +328,13 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
     if ((d = opendir(cfgdir)) == NULL)
         pa_log_info("Can't find config directory '%s'", cfgdir);
     else {
+        files = pa_dynarray_new(NULL);
+
         for (p = cfgdir, q = cfgpath;  (q-cfgpath < PATH_MAX) && *p;   p++,q++)
             *q = *p;
         if (q == cfgpath || q[-1] != '/')
             *q++ = '/'; 
         l = (cfgpath + PATH_MAX) - q;
-
-        errno = 0;
 
         while (l > 1 && (e = readdir(d)) != NULL) {
             if ((p = strstr(e->d_name, ".conf")) != NULL && !p[5]) {
@@ -330,45 +356,73 @@ int pa_policy_parse_files_in_configdir(struct userdata *u, const char *cfgdir)
             strncpy(q, e->d_name, l);
             cfgpath[PATH_MAX-1] = '\0';
 
-            pa_log_info("parsing config file '%s'", cfgpath);
+            pa_dynarray_append(files, pa_xstrdup(cfgpath));
 
-
-            if ((f = fopen(cfgpath, "r")) == NULL) {
-                pa_log("Can't open config file '%s': %s",
-                       cfgpath, strerror(errno));
-                continue;
-            }
-
-            memset(&section, 0, sizeof(section));
-
-            for (errno = 0, lineno = 1;  fgets(buf, BUFSIZE, f);   lineno++) {
-                if (!parse_line(u, lineno, buf, &section, &success))
-                    break;
-            }
-
-            section_close(u, &section);
-
-            if (fclose(f) != 0) {
-                pa_log("Can't close config file '%s': %s",
-                       cfgpath, strerror(errno));
-            }
         } /* while readdir() */
 
         closedir(d);
 
     } /* if opendir() */
 
+    /* read config files in descending order */
+    if (files) {
+        char **sorted_files;
+        unsigned count;
+
+        errno = 0;
+
+        count = pa_dynarray_size(files);
+        sorted_files = pa_xnew(char *, count);
+
+        for (i = 0; i < count; i++)
+            sorted_files[i] = pa_dynarray_get(files, i);
+        pa_dynarray_free(files);
+
+        for (i = 0; i < count; i++) {
+            for (j = 0; j < count; j++) {
+                if (strcmp(sorted_files[i], sorted_files[j]) < 0) {
+                    char *tmp = sorted_files[i];
+                    sorted_files[i] = sorted_files[j];
+                    sorted_files[j] = tmp;
+                }
+            }
+        }
+
+        for (i = 0; i < count; i++) {
+            pa_log_info("parsing config file '%s'", sorted_files[i]);
+
+            if ((f = fopen(sorted_files[i], "r")) == NULL) {
+                pa_log("Can't open config file '%s': %s",
+                        sorted_files[i], strerror(errno));
+                continue;
+            }
+
+            for (errno = 0, lineno = 1;  fgets(buf, BUFSIZE, f);   lineno++) {
+                if (!parse_line(u, lineno, buf, sections, &success))
+                    break;
+            }
+
+            if (fclose(f) != 0) {
+                pa_log("Can't close config file '%s': %s",
+                        sorted_files[i], strerror(errno));
+            }
+
+            pa_xfree(sorted_files[i]);
+        }
+
+        pa_xfree(sorted_files);
+    }
 
     for (i = 0; i < noverride; i++)
         pa_xfree(overrides[i]);
 
     pa_xfree(overrides);
 
-
     return success;
 }
 
-static int parse_line(struct userdata *u, int lineno, char *buf, struct section *section, int *success) {
+static int parse_line(struct userdata *u, int lineno, char *buf, struct sections *sections, int *success) {
+    struct section     *section;
     enum section_type   newsect;
     struct groupdef    *grdef;
     struct devicedef   *devdef;
@@ -385,15 +439,18 @@ static int parse_line(struct userdata *u, int lineno, char *buf, struct section 
         return 1;
 
     if (section_header(lineno, line, &newsect)) {
-        if (section_close(u, section) < 0)
-            *success = 0;
-
+        section = pa_xnew0(struct section, 1);
+        PA_LLIST_INIT(struct section, section);
         section->type = newsect;
+
+        PA_LLIST_PREPEND(struct section, sections->sec, section);
 
         if (section_open(u, newsect, section) < 0)
             *success = 0;
     }
     else {
+        pa_assert_se((section = sections->sec));
+
         switch (section->type) {
 
         case section_group:
@@ -451,6 +508,7 @@ static int parse_line(struct userdata *u, int lineno, char *buf, struct section 
             if (variabledef_parse(lineno, line, &var, &value) < 0)
                 *success = 0;
             else {
+                pa_policy_var_add(u, var, value);
                 pa_xfree(var);
                 pa_xfree(value);
             }
@@ -596,6 +654,32 @@ static int section_open(struct userdata *u, enum section_type type,
     return status;
 }
 
+static int section_close_all(struct userdata *u, struct sections *sections)
+{
+    struct section *section, *tmp, *reverse;
+    int ret = 1;
+
+    PA_LLIST_HEAD_INIT(struct section, reverse);
+
+    /* As the sections are read from configuration files backwards,
+     * we need to reverse the order when closing the sections.
+     */
+    PA_LLIST_FOREACH_SAFE(section, tmp, sections->sec) {
+        PA_LLIST_REMOVE(struct section, sections->sec, section);
+        PA_LLIST_PREPEND(struct section, reverse, section);
+    }
+
+    PA_LLIST_FOREACH_SAFE(section, tmp, reverse) {
+        ret = section_close(u, section);
+        pa_xfree(section);
+        if (ret == 0)
+            goto done;
+    }
+
+done:
+    return ret;
+}
+
 static int section_close(struct userdata *u, struct section *sec)
 {
     struct groupdef   *grdef;
@@ -610,15 +694,15 @@ static int section_close(struct userdata *u, struct section *sec)
     struct delprop    *delprop;
     struct setdef     *setdef;
     int                i;
-    int                status;
+    int                status = 0;
 
     if (sec == NULL)
-        status = -1;
+        status = 0;
     else {
         switch (sec->type) {
             
         case section_group:
-            status = 0;
+            status = 1;
             grdef  = sec->def.group;
 
             /* Transfer ownership of grdef->properties */
@@ -634,7 +718,7 @@ static int section_close(struct userdata *u, struct section *sec)
             break;
             
         case section_device:
-            status = 0;
+            status = 1;
             devdef = sec->def.device;
 
             switch (devdef->class) {
@@ -674,7 +758,7 @@ static int section_close(struct userdata *u, struct section *sec)
             break;
 
         case section_card:
-            status = 0;
+            status = 1;
             carddef = sec->def.card;
 
             pa_classify_add_card(u, carddef->type, carddef->method,
@@ -691,7 +775,7 @@ static int section_close(struct userdata *u, struct section *sec)
             break;
 
         case section_stream:
-            status = 0;
+            status = 1;
             strdef = sec->def.stream;
 
             if (strdef->port)
@@ -713,7 +797,7 @@ static int section_close(struct userdata *u, struct section *sec)
             break;
 
         case section_context:
-            status = 0;
+            status = 1;
             ctxdef = sec->def.context;
 
             rule = pa_policy_context_add_property_rule(u, ctxdef->varnam,
@@ -814,7 +898,7 @@ static int section_close(struct userdata *u, struct section *sec)
             break;
 
         case section_activity:
-            status = 0;
+            status = 1;
             rule = NULL;
             actdef = sec->def.activity;
 
@@ -1005,7 +1089,7 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
             }
             else {
                 *end = '\0';
-                pa_log("invalid key value '%s' in line %d", line, lineno);
+                pa_log("groupdef invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
         }
@@ -1048,7 +1132,7 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
             }
             else {
                 *end = '\0';
-                pa_log("invalid key value '%s' in line %d", line, lineno);
+                pa_log("devicedef invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
         }
@@ -1108,7 +1192,7 @@ static int carddef_parse(int lineno, char *line, struct carddef *carddef)
             }
             else {
                 *end = '\0';
-                pa_log("invalid key value '%s' in line %d", line, lineno);
+                pa_log("carddef invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
         }
@@ -1187,7 +1271,7 @@ static int streamdef_parse(int lineno, char *line, struct streamdef *strdef)
             }
             else {
                 *end = '\0';
-                pa_log("invalid key value '%s' in line %d", line, lineno);
+                pa_log("streamdef invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
         }
@@ -1230,7 +1314,7 @@ static int contextdef_parse(int lineno, char *line, struct contextdef *ctxdef)
             }
             else {
                 *end = '\0';
-                pa_log("invalid key value '%s' in line %d", line, lineno);
+                pa_log("contextdef invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
         }
@@ -1267,7 +1351,7 @@ static int activitydef_parse(int lineno, char *line, struct activitydef *actdef)
             }
             else {
                 *end = '\0';
-                pa_log("invalid key value '%s' in line %d", line, lineno);
+                pa_log("activitydef invalid key value '%s' in line %d", line, lineno);
             }
             sts = -1;
         }
@@ -1961,7 +2045,7 @@ static char **split_strv(const char *s, const char *delimiter) {
 
 const char *policy_file_path(const char *file, char *buf, size_t len)
 {
-    snprintf(buf, len, "%s/x%s", PA_DEFAULT_CONFIG_DIR, file);
+    snprintf(buf, len, "%s/%s", PA_DEFAULT_CONFIG_DIR, file);
 
     return buf;
 }
