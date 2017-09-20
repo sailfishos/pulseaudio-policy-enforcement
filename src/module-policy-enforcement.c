@@ -44,6 +44,7 @@
 #include "card-ext.h"
 #include "module-ext.h"
 #include "dbusif.h"
+#include "variable.h"
 
 PA_MODULE_AUTHOR("Janos Kovacs");
 PA_MODULE_DESCRIPTION("Policy enforcement module");
@@ -137,6 +138,7 @@ int pa__init(pa_module *m) {
     u->classify = pa_classify_new(u);
     u->context  = pa_policy_context_new(u);
     u->dbusif   = pa_policy_dbusif_init(u, ifnam, mypath, pdpath, pdnam, route_sources_first);
+    u->vars     = pa_policy_var_init();
     u->shared   = pa_shared_data_get(u->core);
 
     if (u->scl == NULL      || u->ssnk == NULL     || u->ssrc == NULL ||
@@ -190,6 +192,7 @@ void pa__done(pa_module *m) {
         return;
     
     pa_policy_dbusif_done(u);
+    pa_policy_var_done(u->vars);
 
     pa_client_ext_subscription_free(u->scl);
     pa_sink_ext_subscription_free(u->ssnk);
