@@ -150,8 +150,7 @@ int pa__init(pa_module *m) {
 
     pa_policy_groupset_update_default_sink(u, PA_IDXSET_INVALID);
 
-    if (!pa_policy_parse_config_file(u, cfgfile) ||
-        !pa_policy_parse_files_in_configdir(u, cfgdir))
+    if (!pa_policy_parse_config_files(u, cfgfile, cfgdir))
         goto fail;
 
     if (pa_policy_group_find(u, PA_POLICY_DEFAULT_GROUP_NAME) == NULL) {
