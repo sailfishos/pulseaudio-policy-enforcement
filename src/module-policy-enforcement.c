@@ -45,10 +45,6 @@
 #include "module-ext.h"
 #include "dbusif.h"
 
-#ifndef PA_DEFAULT_CONFIG_DIR
-#define PA_DEFAULT_CONFIG_DIR "/etc/pulse"
-#endif
-
 PA_MODULE_AUTHOR("Janos Kovacs");
 PA_MODULE_DESCRIPTION("Policy enforcement module");
 PA_MODULE_VERSION(PACKAGE_VERSION);
@@ -213,18 +209,6 @@ void pa__done(pa_module *m) {
 
     
     pa_xfree(u);
-}
-
-
-/*
- * For the time being the prototype is in the userdata.h which is
- * not the best possible place for it
- */
-const char *pa_policy_file_path(const char *file, char *buf, size_t len)
-{
-    snprintf(buf, len, "%s/x%s", PA_DEFAULT_CONFIG_DIR, file);
-
-    return buf;
 }
 
 

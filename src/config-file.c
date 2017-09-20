@@ -29,6 +29,10 @@
 #include "classify.h"
 #include "context.h"
 
+#ifndef PA_DEFAULT_CONFIG_DIR
+#define PA_DEFAULT_CONFIG_DIR "/etc/pulse"
+#endif
+
 #define DEFAULT_CONFIG_FILE        "policy.conf"
 #define DEFAULT_CONFIG_DIRECTORY   "/etc/pulse/xpolicy.conf.d"
 
@@ -195,6 +199,7 @@ static int contextanyprop_parse(int, char *, char *, struct anyprop *);
 static int cardname_parse(int, char *, struct carddef *, int field);
 static int flags_parse(int, char *, enum section_type, uint32_t *);
 static int valid_label(int, char *);
+const char *policy_file_path(const char *file, char *buf, size_t len);
 
 static char **split_strv(const char *s, const char *delimiter);
 
@@ -216,7 +221,7 @@ int pa_policy_parse_config_file(struct userdata *u, const char *cfgfile)
     if (!cfgfile)
         cfgfile = DEFAULT_CONFIG_FILE;
 
-    pa_policy_file_path(cfgfile, cfgpath, PATH_MAX);
+    policy_file_path(cfgfile, cfgpath, PATH_MAX);
     snprintf(ovrpath, PATH_MAX, "%s.override", cfgpath);
 
     if ((f = fopen(ovrpath,"r")) != NULL)
@@ -1953,6 +1958,14 @@ static char **split_strv(const char *s, const char *delimiter) {
     t[i] = NULL;
     return t;
 }
+
+const char *policy_file_path(const char *file, char *buf, size_t len)
+{
+    snprintf(buf, len, "%s/x%s", PA_DEFAULT_CONFIG_DIR, file);
+
+    return buf;
+}
+
 
 /*
  * Local Variables:

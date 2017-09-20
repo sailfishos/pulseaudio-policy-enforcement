@@ -50,12 +50,6 @@ struct userdata {
 };
 
 
-/*
- * Some day this should go to a better place
- */
-const char *pa_policy_file_path(const char *file, char *buf, size_t len);
-
-
 #endif
 
 /*
