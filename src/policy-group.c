@@ -13,6 +13,7 @@
 #include "source-output-ext.h"
 #include "classify.h"
 #include "dbusif.h"
+#include "variable.h"
 
 #define MUTE   1
 #define UNMUTE 0
@@ -333,6 +334,11 @@ struct pa_policy_group *pa_policy_group_new(struct userdata *u, const char *name
 
     pa_assert(u);
     pa_assert_se((gset = u->groups));
+
+    /* update variables */
+    pa_policy_var_update(u, name);
+    pa_policy_var_update(u, sinkname);
+    pa_policy_var_update(u, srcname);
 
     if ((group = find_group_by_name(gset, name, &idx)) != NULL)
         return group;
