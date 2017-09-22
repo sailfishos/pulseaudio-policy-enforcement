@@ -174,13 +174,15 @@ struct pa_policy_context_rule
     *pa_policy_context_add_property_rule(struct userdata *, const char *,
                                          enum pa_classify_method, const char *);
 
-void pa_policy_context_add_property_action(struct pa_policy_context_rule *,int,
+void pa_policy_context_add_property_action(struct userdata *,
+                                           struct pa_policy_context_rule *,int,
                                            enum pa_policy_object_type,
                                            enum pa_classify_method, const char *,
                                            const char *,
                                            enum pa_policy_value_type, ...);
 
-void pa_policy_context_delete_property_action(struct pa_policy_context_rule *,
+void pa_policy_context_delete_property_action(struct userdata *,
+                                              struct pa_policy_context_rule *,
                                               int,
                                               enum pa_policy_object_type,
                                               enum pa_classify_method,

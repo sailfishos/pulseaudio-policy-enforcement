@@ -11,6 +11,7 @@
 #include "source-ext.h"
 #include "sink-input-ext.h"
 #include "source-output-ext.h"
+#include "variable.h"
 
 static struct pa_policy_context_variable
             *add_variable(struct pa_policy_context *, const char *);
@@ -34,8 +35,8 @@ static int   match_setup(struct pa_policy_match *, enum pa_classify_method,
                          const char *, enum pa_classify_method *);
 static void  match_cleanup(struct pa_policy_match *);
 
-static int   value_setup(union pa_policy_value *, enum pa_policy_value_type,
-                         va_list);
+static int   value_setup(struct userdata *u, union pa_policy_value *,
+                         enum pa_policy_value_type, va_list);
 static void  value_cleanup(union pa_policy_value *);
 
 static void register_object(struct pa_policy_object *,
@@ -206,6 +207,10 @@ pa_policy_context_add_property_rule(struct userdata *u, const char *varname,
     struct pa_policy_context_variable *variable;
     struct pa_policy_context_rule     *rule;
 
+    /* update variables */
+    pa_policy_var_update(u, varname);
+    pa_policy_var_update(u, arg);
+
     variable = add_variable(u->context, varname);
     rule     = add_rule(&variable->rules, method, arg);
 
@@ -213,7 +218,8 @@ pa_policy_context_add_property_rule(struct userdata *u, const char *varname,
 }
 
 void
-pa_policy_context_add_property_action(struct pa_policy_context_rule *rule,
+pa_policy_context_add_property_action(struct userdata *u,
+                                      struct pa_policy_context_rule *rule,
                                       int                         lineno,
                                       enum pa_policy_object_type  obj_type,
                                       enum pa_classify_method     obj_classify,
@@ -226,9 +232,13 @@ pa_policy_context_add_property_action(struct pa_policy_context_rule *rule,
     struct pa_policy_set_property  *setprop;
     va_list                         value_arg;
 
+    /* update variables */
+    pa_policy_var_update(u, obj_name);
+    pa_policy_var_update(u, prop_name);
+
     action  = pa_xmalloc0(sizeof(*action));
-    setprop = &action->setprop; 
-    
+    setprop = &action->setprop;
+
     setprop->type   = pa_policy_set_property;
     setprop->lineno = lineno;
 
@@ -238,14 +248,15 @@ pa_policy_context_add_property_action(struct pa_policy_context_rule *rule,
     setprop->property = pa_xstrdup(prop_name);
 
     va_start(value_arg, value_type);
-    value_setup(&setprop->value, value_type, value_arg);
+    value_setup(u, &setprop->value, value_type, value_arg);
     va_end(value_arg);
 
     append_action(&rule->actions, action);
 }
 
 void
-pa_policy_context_delete_property_action(struct pa_policy_context_rule *rule,
+pa_policy_context_delete_property_action(struct userdata *u,
+                                         struct pa_policy_context_rule *rule,
                                          int                      lineno,
                                          enum pa_policy_object_type obj_type,
                                          enum pa_classify_method  obj_classify,
@@ -254,6 +265,10 @@ pa_policy_context_delete_property_action(struct pa_policy_context_rule *rule,
 {
     union pa_policy_context_action *action;
     struct pa_policy_del_property  *delprop;
+
+    /* update variables */
+    pa_policy_var_update(u, obj_name);
+    pa_policy_var_update(u, prop_name);
 
     action  = pa_xmalloc0(sizeof(*action));
     delprop = &action->delprop; 
@@ -278,6 +293,9 @@ pa_policy_context_set_default_action(struct pa_policy_context_rule *rule,
 {
     union pa_policy_context_action *action;
     struct pa_policy_set_default   *setdef;
+
+    /* update variables */
+    pa_policy_var_update(u, activity_group);
 
     action = pa_xmalloc0(sizeof(*action));
     setdef = &action->setdef;
@@ -306,6 +324,10 @@ pa_policy_context_override_action(struct userdata               *u,
     struct pa_policy_override      *overr;
     va_list                         value_arg;
 
+    /* update variables */
+    pa_policy_var_update(u, obj_name);
+    pa_policy_var_update(u, profile_name);
+
     action  = pa_xmalloc0(sizeof(*action));
     overr = &action->overr;
 
@@ -318,7 +340,7 @@ pa_policy_context_override_action(struct userdata               *u,
     overr->profile = pa_xstrdup(profile_name);
 
     va_start(value_arg, value_type);
-    value_setup(&overr->value, value_type, value_arg);
+    value_setup(u, &overr->value, value_type, value_arg);
     va_end(value_arg);
 
     /* Store the value for the rule but set the method as true so
@@ -872,7 +894,8 @@ static void match_cleanup(struct pa_policy_match *match)
     memset(match, 0, sizeof(*match));
 }
 
-static int value_setup(union pa_policy_value     *value,
+static int value_setup(struct userdata           *u,
+                       union pa_policy_value     *value,
                        enum pa_policy_value_type  type,
                        va_list                    ap)
 {
@@ -891,7 +914,7 @@ static int value_setup(union pa_policy_value     *value,
         string   = va_arg(arg, char *);
 
         constant->type   = pa_policy_value_constant;
-        constant->string = pa_xstrdup(string);
+        constant->string = pa_xstrdup(pa_policy_var(u, string));
 
         break;
 
@@ -1251,7 +1274,7 @@ void
 pa_policy_activity_add(struct userdata *u, const char *device)
 {
     /* create new activity variable here */
-    get_activity_variable(u, u->context, device);
+    get_activity_variable(u, u->context, pa_policy_var(u, device));
 }
 
 struct pa_policy_context_rule *
@@ -1260,6 +1283,9 @@ pa_policy_activity_add_active_rule(struct userdata *u, const char *device,
 {
     struct pa_policy_activity_variable *variable;
     struct pa_policy_context_rule      *rule;
+
+    pa_policy_var_update(u, device);
+    pa_policy_var_update(u, sink_name);
 
     pa_assert_se((variable = get_activity_variable(u, u->context, device)));
     rule = add_rule(&variable->active_rules, method, sink_name);

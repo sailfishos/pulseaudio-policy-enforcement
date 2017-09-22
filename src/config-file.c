@@ -814,6 +814,7 @@ static int section_close(struct userdata *u, struct section *sec)
 
                     if (rule != NULL) {
                         pa_policy_context_add_property_action(
+                                          u,
                                           rule, act->lineno,
                                           setprop->objtype,
                                           setprop->method,
@@ -835,6 +836,7 @@ static int section_close(struct userdata *u, struct section *sec)
 
                     if (rule != NULL) {
                         pa_policy_context_delete_property_action(
+                                          u,
                                           rule, act->lineno,
                                           delprop->objtype,
                                           delprop->method,
@@ -918,6 +920,7 @@ static int section_close(struct userdata *u, struct section *sec)
 
                     if (rule != NULL) {
                         pa_policy_context_add_property_action(
+                                          u,
                                           rule, act->lineno,
                                           setprop->objtype,
                                           setprop->method,
@@ -955,6 +958,7 @@ static int section_close(struct userdata *u, struct section *sec)
 
                     if (rule != NULL) {
                         pa_policy_context_add_property_action(
+                                          u,
                                           rule, act->lineno,
                                           setprop->objtype,
                                           setprop->method,
