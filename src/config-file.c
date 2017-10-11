@@ -680,6 +680,135 @@ done:
     return ret;
 }
 
+static void section_free(struct section *sec) {
+    struct ctxact      *act;
+    struct setprop     *setprop;
+    struct delprop     *delprop;
+    struct setdef      *setdef;
+    int                 i;
+
+    switch (sec->type) {
+        case section_group:
+            pa_xfree(sec->def.group->name);
+            pa_xfree(sec->def.group->sink);
+            pa_xfree(sec->def.group->source);
+            pa_xfree(sec->def.group->flags);
+            pa_xfree(sec->def.group);
+            break;
+
+        case section_device:
+            if (sec->def.device->ports)
+                pa_hashmap_free(sec->def.device->ports);
+            pa_xfree(sec->def.device->type);
+            pa_xfree(sec->def.device->prop);
+            pa_xfree(sec->def.device->arg);
+            pa_xfree(sec->def.device->module);
+            pa_xfree(sec->def.device->module_args);
+            pa_xfree(sec->def.device->flags);
+            pa_xfree(sec->def.device);
+            break;
+
+        case section_card:
+            pa_xfree(sec->def.card->type);
+            for (i = 0; i < 2; i++) {
+                pa_xfree(sec->def.card->arg[i]);
+                pa_xfree(sec->def.card->profile[i]);
+                pa_xfree(sec->def.card->flags[i]);
+            }
+            pa_xfree(sec->def.card);
+            break;
+
+        case section_stream:
+            pa_xfree(sec->def.stream->prop);
+            pa_xfree(sec->def.stream->arg);
+            pa_xfree(sec->def.stream->clnam);
+            pa_xfree(sec->def.stream->sname);
+            pa_xfree(sec->def.stream->exe);
+            pa_xfree(sec->def.stream->group);
+            pa_xfree(sec->def.stream->port);
+            pa_xfree(sec->def.stream);
+            break;
+
+        case section_context:
+            for (i = 0; i < sec->def.context->nact; i++) {
+                act = sec->def.context->acts + i;
+                switch (act->type) {
+                    case pa_policy_set_property:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+
+                    case pa_policy_delete_property:
+                        delprop = &act->delprop;
+                        pa_xfree(delprop->arg);
+                        pa_xfree(delprop->propnam);
+                        break;
+
+                    case pa_policy_set_default:
+                        setdef = &act->setdef;
+                        pa_xfree(setdef->activity_group);
+                        break;
+
+                    case pa_policy_override:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+            pa_xfree(sec->def.context->varnam);
+            pa_xfree(sec->def.context->arg);
+            pa_xfree(sec->def.context->acts);
+            pa_xfree(sec->def.context);
+            break;
+
+        case section_activity:
+            for (i = 0; i < sec->def.activity->active_nact; i++) {
+                act = sec->def.activity->active_acts + i;
+                switch (act->type) {
+                    case pa_policy_set_property:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            for (i = 0; i < sec->def.activity->inactive_nact; i++) {
+                act = sec->def.activity->inactive_acts + i;
+                switch (act->type) {
+                    case pa_policy_set_property:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            pa_xfree(sec->def.activity->name);
+            pa_xfree(sec->def.activity->active_acts);
+            pa_xfree(sec->def.activity->inactive_acts);
+            pa_xfree(sec->def.activity);
+            break;
+
+        case section_variable:
+            break;
+
+        default:
+            break;
+    }
+}
+
 static int section_close(struct userdata *u, struct section *sec)
 {
     struct groupdef   *grdef;
@@ -709,11 +838,6 @@ static int section_close(struct userdata *u, struct section *sec)
             pa_policy_group_new(u, grdef->name,   grdef->sink,
                                    grdef->source, grdef->properties,
                                    grdef->flags);
-
-            pa_xfree(grdef->name);
-            pa_xfree(grdef->sink);
-            pa_xfree(grdef->source);
-            pa_xfree(grdef);
 
             break;
             
@@ -745,16 +869,6 @@ static int section_close(struct userdata *u, struct section *sec)
                 break;
             }
 
-            if (devdef->ports)
-                pa_hashmap_free(devdef->ports);
-
-            pa_xfree(devdef->type);
-            pa_xfree(devdef->prop);
-            pa_xfree(devdef->arg);
-            pa_xfree(devdef->module);
-            pa_xfree(devdef->module_args);
-            pa_xfree(devdef);
-
             break;
 
         case section_card:
@@ -765,12 +879,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                  carddef->arg, carddef->profile,
                                  carddef->flags);
 
-            pa_xfree(carddef->type);
-            for (i = 0; i < 2; i++) {
-                pa_xfree(carddef->arg[i]);
-                pa_xfree(carddef->profile[i]);
-            }
-            pa_xfree(carddef);
 
             break;
 
@@ -784,15 +892,6 @@ static int section_close(struct userdata *u, struct section *sec)
             pa_classify_add_stream(u, strdef->prop,strdef->method,strdef->arg,
                                    strdef->clnam, strdef->sname, strdef->uid, strdef->exe,
                                    strdef->group, strdef->flags, strdef->port);
-
-            pa_xfree(strdef->prop);
-            pa_xfree(strdef->arg);
-            pa_xfree(strdef->clnam);
-            pa_xfree(strdef->sname);
-            pa_xfree(strdef->exe);
-            pa_xfree(strdef->group);
-            pa_xfree(strdef->port);
-            pa_xfree(strdef);
 
             break;
 
@@ -824,11 +923,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setprop->valarg
                         );
                     }
-
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
 
                 case pa_policy_delete_property:
@@ -844,10 +938,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                           delprop->propnam
                         );
                     }
-
-                    pa_xfree(delprop->arg);
-                    pa_xfree(delprop->propnam);
-
                     break;
 
                 case pa_policy_set_default:
@@ -860,8 +950,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setdef->activity_group,
                                           setdef->default_state);
                     }
-
-                    pa_xfree(setdef->activity_group);
 
                     break;
 
@@ -881,21 +969,12 @@ static int section_close(struct userdata *u, struct section *sec)
                         );
                     }
 
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
 
                 default:
                     break;
                 }
             }
-
-            pa_xfree(ctxdef->varnam);
-            pa_xfree(ctxdef->arg);
-            pa_xfree(ctxdef->acts);
-            pa_xfree(ctxdef);
 
             break;
 
@@ -931,10 +1010,6 @@ static int section_close(struct userdata *u, struct section *sec)
                         );
                     }
 
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
                 default:
                     break;
@@ -969,20 +1044,11 @@ static int section_close(struct userdata *u, struct section *sec)
                         );
                     }
 
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
                 default:
                     break;
                 }
             }
-
-            pa_xfree(actdef->name);
-            pa_xfree(actdef->active_acts);
-            pa_xfree(actdef->inactive_acts);
-            pa_xfree(actdef);
 
             break;
 
@@ -998,6 +1064,8 @@ static int section_close(struct userdata *u, struct section *sec)
         sec->type = section_unknown;
         sec->def.any = NULL;
     }
+
+    section_free(sec);
 
     return status;
 }
