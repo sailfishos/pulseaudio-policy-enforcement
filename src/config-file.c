@@ -210,7 +210,7 @@ static int contextsetdef_parse(int lineno, char *setdefdef, int *nact, struct ct
 static int contextoverride_parse(int lineno, char *setdefdef, int *nact, struct ctxact **acts);
 static int contextanyprop_parse(int, char *, char *, struct anyprop *);
 static int cardname_parse(int, char *, struct carddef *, int field);
-static int flags_parse(int, char *, enum section_type, uint32_t *);
+static int flags_parse(struct userdata *u, int, const char *, enum section_type, uint32_t *);
 static int valid_label(int, char *);
 const char *policy_file_path(const char *file, char *buf, size_t len);
 
@@ -840,7 +840,7 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             grdef  = sec->def.group;
 
-            flags_parse(grdef->flags_lineno, grdef->flags, section_group, &flags);
+            flags_parse(u, grdef->flags_lineno, grdef->flags, section_group, &flags);
 
             /* Transfer ownership of grdef->properties */
             pa_policy_group_new(u, grdef->name,   grdef->sink,
@@ -853,7 +853,7 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             devdef = sec->def.device;
 
-            flags_parse(devdef->flags_lineno, devdef->flags, section_device, &flags);
+            flags_parse(u, devdef->flags_lineno, devdef->flags, section_device, &flags);
 
             switch (devdef->class) {
 
@@ -886,7 +886,7 @@ static int section_close(struct userdata *u, struct section *sec)
             carddef = sec->def.card;
 
             for (i = 0; i < 2; i++)
-                flags_parse(carddef->flags_lineno[i], carddef->flags[i], section_card, &card_flags[i]);
+                flags_parse(u, carddef->flags_lineno[i], carddef->flags[i], section_card, &card_flags[i]);
 
             pa_classify_add_card(u, carddef->type, carddef->method,
                                  carddef->arg, carddef->profile,
@@ -899,7 +899,7 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             strdef = sec->def.stream;
 
-            flags_parse(strdef->flags_lineno, strdef->flags, section_stream, &flags);
+            flags_parse(u, strdef->flags_lineno, strdef->flags, section_stream, &flags);
 
             if (strdef->port)
                 flags |= PA_POLICY_LOCAL_ROUTE;
@@ -1982,9 +1982,11 @@ static int cardname_parse(int lineno, char *namedef, struct carddef *carddef, in
     return 0;
 }
 
-static int flags_parse(int lineno, char  *flagdef,
-                       enum section_type  sectn,
-                       uint32_t          *flags_ret)
+static int flags_parse(struct userdata  *u,
+                       int               lineno,
+                       const char       *flagdef,
+                       enum section_type sectn,
+                       uint32_t         *flags_ret)
 {
     char       *comma;
     const char *flagname;
@@ -1995,6 +1997,8 @@ static int flags_parse(int lineno, char  *flagdef,
 
     if (!flagdef)
         goto done;
+
+    pa_policy_var_update(u, flagdef);
 
     device = card = stream = group = false;
 
@@ -2014,6 +2018,8 @@ static int flags_parse(int lineno, char  *flagdef,
             *comma = '\0';
             flagdef = comma + 1;
         }
+
+        flagname = pa_policy_var(u, flagname);
 
         if ((device || card) && !strcmp(flagname, "disable_notify"))
             flags |= PA_POLICY_DISABLE_NOTIFY;
@@ -2051,7 +2057,7 @@ static int flags_parse(int lineno, char  *flagdef,
             flags |= PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE;
         else if (group && !strcmp(flagname, "media_notify"))
             flags |= PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY;
-        else
+        else if (strlen(flagname) > 0)
             pa_log("invalid flag '%s' in line %d", flagname, lineno);
     }
 
