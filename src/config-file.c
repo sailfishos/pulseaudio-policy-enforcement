@@ -103,7 +103,8 @@ struct groupdef {
     char                    *sink;
     char                    *source;
     pa_proplist             *properties;
-    uint32_t                 flags;
+    char                    *flags;
+    int                      flags_lineno;
 };
 
 struct devicedef {
@@ -116,7 +117,8 @@ struct devicedef {
                                      * pa_classify_port_entry. */
     char                    *module;
     char                    *module_args;
-    uint32_t                 flags;
+    char                    *flags;
+    int                      flags_lineno;
 };
 
 struct carddef {
@@ -124,7 +126,8 @@ struct carddef {
     enum pa_classify_method  method[2];
     char                    *arg[2];
     char                    *profile[2];
-    uint32_t                 flags[2];
+    char                    *flags[2];
+    int                      flags_lineno[2];
 };
 
 struct streamdef {
@@ -136,7 +139,8 @@ struct streamdef {
     uid_t                    uid;    /* client's user id */
     char                    *exe;    /* the executable name (i.e. argv[0]) */
     char                    *group;  /* group name the stream belong to */
-    uint32_t                 flags;  /* stream flags */
+    char                    *flags;  /* stream flags */
+    int                      flags_lineno;
     char                    *port;   /* port for local routing, if any */
 };
 
@@ -822,28 +826,34 @@ static int section_close(struct userdata *u, struct section *sec)
     struct setprop    *setprop;
     struct delprop    *delprop;
     struct setdef     *setdef;
-    int                i;
+    uint32_t           card_flags[2] = { 0, 0};
+    uint32_t           flags = 0;
     int                status = 0;
+    int                i;
 
     if (sec == NULL)
         status = 0;
     else {
         switch (sec->type) {
-            
+
         case section_group:
             status = 1;
             grdef  = sec->def.group;
 
+            flags_parse(grdef->flags_lineno, grdef->flags, section_group, &flags);
+
             /* Transfer ownership of grdef->properties */
             pa_policy_group_new(u, grdef->name,   grdef->sink,
                                    grdef->source, grdef->properties,
-                                   grdef->flags);
+                                   flags);
 
             break;
-            
+
         case section_device:
             status = 1;
             devdef = sec->def.device;
+
+            flags_parse(devdef->flags_lineno, devdef->flags, section_device, &flags);
 
             switch (devdef->class) {
 
@@ -853,7 +863,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                      devdef->prop, devdef->method, devdef->arg,
                                      devdef->ports,
                                      devdef->module, devdef->module_args,
-                                     devdef->flags);
+                                     flags);
                 break;
 
             case device_source:
@@ -862,7 +872,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                        devdef->prop, devdef->method,
                                        devdef->arg, devdef->ports,
                                        devdef->module, devdef->module_args,
-                                       devdef->flags);
+                                       flags);
                 break;
 
             default:
@@ -875,9 +885,12 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             carddef = sec->def.card;
 
+            for (i = 0; i < 2; i++)
+                flags_parse(carddef->flags_lineno[i], carddef->flags[i], section_card, &card_flags[i]);
+
             pa_classify_add_card(u, carddef->type, carddef->method,
                                  carddef->arg, carddef->profile,
-                                 carddef->flags);
+                                 card_flags);
 
 
             break;
@@ -886,12 +899,14 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             strdef = sec->def.stream;
 
+            flags_parse(strdef->flags_lineno, strdef->flags, section_stream, &flags);
+
             if (strdef->port)
-                strdef->flags |= PA_POLICY_LOCAL_ROUTE;
+                flags |= PA_POLICY_LOCAL_ROUTE;
 
             pa_classify_add_stream(u, strdef->prop,strdef->method,strdef->arg,
                                    strdef->clnam, strdef->sname, strdef->uid, strdef->exe,
-                                   strdef->group, strdef->flags, strdef->port);
+                                   strdef->group, flags, strdef->port);
 
             break;
 
@@ -1075,11 +1090,6 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
 {
     int       sts = 0;
     char     *end;
-    char     *comma;
-    char     *fldef;
-    char     *flname;
-    int       len;
-    uint32_t  flags;
 
     if (grdef == NULL)
         sts = -1;
@@ -1103,57 +1113,8 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
                 pa_log("incorrect syntax in line %d (%s)", lineno, line + 11);
         }
         else if (!strncmp(line, "flags=", 6)) { 
-            fldef = line + 6;
-            
-            if (fldef[0] == '\0') {
-                sts = -1;
-                pa_log("missing flag definition in line %d", lineno);
-            }
-            else {
-                sts = 0;
-
-                if (!strcmp(fldef, "client"))
-                    flags = PA_POLICY_GROUP_FLAGS_CLIENT;
-                else if (!strcmp(fldef, "nopolicy"))
-                    flags = PA_POLICY_GROUP_FLAGS_NOPOLICY;
-                else {
-                    flags = 0;
-
-                    for (flname = fldef;  *flname;  flname += len) {
-                        if ((comma = strchr(flname, ',')) == NULL)
-                            len = strlen(flname);
-                        else {
-                            *comma = '\0';
-                            len = (comma - flname) + 1;
-                        }
-
-                        if (!strcmp(flname, "set_sink"))
-                            flags |= PA_POLICY_GROUP_FLAG_SET_SINK;
-                        else if (!strcmp(flname, "set_source"))
-                            flags |= PA_POLICY_GROUP_FLAG_SET_SOURCE;
-                        else if (!strcmp(flname, "route_audio"))
-                            flags |= PA_POLICY_GROUP_FLAG_ROUTE_AUDIO;
-                        else if (!strcmp(flname, "limit_volume"))
-                            flags |= PA_POLICY_GROUP_FLAG_LIMIT_VOLUME;
-                        else if (!strcmp(flname, "cork_stream"))
-                            flags |= PA_POLICY_GROUP_FLAG_CORK_STREAM;
-                        else if (!strcmp(flname, "mute_by_route"))
-                            flags |= PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE;
-                        else if (!strcmp(flname, "media_notify"))
-                            flags |= PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY;
-                        else {
-                            pa_log("invalid flag '%s' in line %d",
-                                   flname, lineno);
-                            sts = -1;
-                            break;
-                        }
-                    } /* for */
-                }
-
-                if (sts >= 0) {
-                    grdef->flags = flags;
-                }
-            }
+            grdef->flags = pa_xstrdup(line+6);
+            grdef->flags_lineno = lineno;
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
@@ -1196,7 +1157,8 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
             sts = module_parse(lineno, line+7, devdef);
         }
         else if (!strncmp(line, "flags=", 6)) {
-            sts = flags_parse(lineno, line+6, section_device, &devdef->flags);
+            devdef->flags = pa_xstrdup(line+6);
+            devdef->flags_lineno = lineno;
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
@@ -1250,13 +1212,16 @@ static int carddef_parse(int lineno, char *line, struct carddef *carddef)
             }
         }
         else if (!strncmp(line, "flags=", 6)) {
-            sts = flags_parse(lineno, line+6, section_card, &carddef->flags[0]);
+            carddef->flags[0] = pa_xstrdup(line+6);
+            carddef->flags_lineno[0] = lineno;
         }
         else if (!strncmp(line, "flags0=", 7)) {
-            sts = flags_parse(lineno, line+7, section_card, &carddef->flags[0]);
+            carddef->flags[0] = pa_xstrdup(line+7);
+            carddef->flags_lineno[0] = lineno;
         }
         else if (!strncmp(line, "flags1=", 7)) {
-            sts = flags_parse(lineno, line+7, section_card, &carddef->flags[1]);
+            carddef->flags[1] = pa_xstrdup(line+7);
+            carddef->flags_lineno[1] = lineno;
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
@@ -1332,7 +1297,8 @@ static int streamdef_parse(int lineno, char *line, struct streamdef *strdef)
             strdef->group = pa_xstrdup(line+6);
         }
         else if (!strncmp(line, "flags=", 6)) {
-            sts = flags_parse(lineno, line+6, section_stream, &strdef->flags);
+            strdef->flags = pa_xstrdup(line+6);
+            strdef->flags_lineno = lineno;
         }
         else if (!strncmp(line, "port_if_active=", 15)) {
             strdef->port = pa_xstrdup(line+15);
@@ -2020,19 +1986,23 @@ static int flags_parse(int lineno, char  *flagdef,
                        enum section_type  sectn,
                        uint32_t          *flags_ret)
 {
-    char     *comma;
-    char     *flagname;
-    uint32_t  flags;
-    int       device, card, stream;
+    char       *comma;
+    const char *flagname;
+    uint32_t    flags;
+    int         device, card, stream, group;
 
     flags = 0;
 
-    device = card = stream = false;
+    if (!flagdef)
+        goto done;
+
+    device = card = stream = group = false;
 
     switch (sectn) {
     case section_device:   device = true;   break;
     case section_card:     card   = true;   break;
     case section_stream:   stream = true;   break;
+    case section_group:    group  = true;   break;
     default:                                break;
     }
 
@@ -2047,24 +2017,45 @@ static int flags_parse(int lineno, char  *flagdef,
 
         if ((device || card) && !strcmp(flagname, "disable_notify"))
             flags |= PA_POLICY_DISABLE_NOTIFY;
+
         else if (device && !strcmp(flagname, "refresh_always"))
             flags |= PA_POLICY_REFRESH_PORT_ALWAYS;
         else if (device && !strcmp(flagname, "delayed_port_change"))
             flags |= PA_POLICY_DELAYED_PORT_CHANGE;
         else if (device && !strcmp(flagname, "module_unload_immediately"))
             flags |= PA_POLICY_MODULE_UNLOAD_IMMEDIATELY;
+
         else if (stream && !strcmp(flagname, "mute_if_active"))
             flags |= PA_POLICY_LOCAL_MUTE;
         else if (stream && !strcmp(flagname, "max_volume"))
             flags |= PA_POLICY_LOCAL_VOLMAX;
+
         else if (card && !strcmp(flagname, "notify_profile_changed"))
             flags |= PA_POLICY_NOTIFY_PROFILE_CHANGED;
-        else {
+
+        else if (group && !strcmp(flagname, "client"))
+            flags = PA_POLICY_GROUP_FLAGS_CLIENT;
+        else if (group && !strcmp(flagname, "nopolicy"))
+            flags = PA_POLICY_GROUP_FLAGS_NOPOLICY;
+        else if (group && !strcmp(flagname, "set_sink"))
+            flags |= PA_POLICY_GROUP_FLAG_SET_SINK;
+        else if (group && !strcmp(flagname, "set_source"))
+            flags |= PA_POLICY_GROUP_FLAG_SET_SOURCE;
+        else if (group && !strcmp(flagname, "route_audio"))
+            flags |= PA_POLICY_GROUP_FLAG_ROUTE_AUDIO;
+        else if (group && !strcmp(flagname, "limit_volume"))
+            flags |= PA_POLICY_GROUP_FLAG_LIMIT_VOLUME;
+        else if (group && !strcmp(flagname, "cork_stream"))
+            flags |= PA_POLICY_GROUP_FLAG_CORK_STREAM;
+        else if (group && !strcmp(flagname, "mute_by_route"))
+            flags |= PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE;
+        else if (group && !strcmp(flagname, "media_notify"))
+            flags |= PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY;
+        else
             pa_log("invalid flag '%s' in line %d", flagname, lineno);
-            return -1;
-        }
     }
 
+done:
     *flags_ret = flags;
 
     return 0;
