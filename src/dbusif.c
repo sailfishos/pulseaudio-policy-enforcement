@@ -44,6 +44,12 @@
 #define PROP_ROUTE_SOURCE_MODE      "policy.source_route.mode"
 #define PROP_ROUTE_SOURCE_HWID      "policy.source_route.hwid"
 
+#define POLICY_DBUS_INFO            "info"
+#define POLICY_DBUS_MEDIA           "media"
+#define POLICY_DBUS_STATE_PATH      POLICY_DBUS_PDPATH "/" POLICY_DBUS_INFO
+#define POLICY_DBUS_MEDIA_PATH      POLICY_DBUS_PDPATH "/" POLICY_DBUS_INFO
+#define POLICY_DBUS_STATE_ACT       "active"
+#define POLICY_DBUS_STATE_INACT     "inactive"
 
 #define STRUCT_OFFSET(s,m) ((char *)&(((s *)0)->m) - (char *)0)
 
@@ -285,22 +291,22 @@ void pa_policy_dbusif_done(struct userdata *u)
 }
 
 void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
-                                        const char **types, int ntype)
+                                        const struct pa_classify_result *list)
 {
-    const char              *path = "/com/nokia/policy/info";
+    const char              *path = POLICY_DBUS_STATE_PATH;
 
     struct pa_policy_dbusif *dbusif = u->dbusif;
     DBusConnection          *conn   = pa_dbus_connection_get(dbusif->conn);
     DBusMessage             *msg;
     DBusMessageIter          mit;
     DBusMessageIter          dit;
-    int                      i;
+    uint32_t                 i;
     int                      sts;
 
-    if (!types || ntype < 1)
+    if (!list || list->count == 0)
         return;
 
-    msg = dbus_message_new_signal(path, dbusif->ifnam, "info");
+    msg = dbus_message_new_signal(path, dbusif->ifnam, POLICY_DBUS_INFO);
 
     if (msg == NULL) {
         pa_log("failed to make new info message");
@@ -315,8 +321,8 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
         goto fail;
     }
 
-    for (i = 0; i < ntype; i++) {
-        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING,&types[i])){
+    for (i = 0; i < list->count; i++) {
+        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING, &list->types[i])) {
             pa_log("failed to build info message");
             goto fail;
         }
@@ -337,8 +343,8 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
 void pa_policy_dbusif_send_media_status(struct userdata *u, const char *media,
                                         const char *group, int active)
 {
-    const char              *path = "/com/nokia/policy/info";
-    const char              *type = "media";
+    const char              *path = POLICY_DBUS_MEDIA_PATH;
+    const char              *type = POLICY_DBUS_MEDIA;
 
     struct pa_policy_dbusif *dbusif = u->dbusif;
     DBusConnection          *conn   = pa_dbus_connection_get(dbusif->conn);
@@ -346,12 +352,12 @@ void pa_policy_dbusif_send_media_status(struct userdata *u, const char *media,
     const char              *state;
     int                      success;
 
-    msg = dbus_message_new_signal(path, dbusif->ifnam, "info");
+    msg = dbus_message_new_signal(path, dbusif->ifnam, POLICY_DBUS_INFO);
 
     if (msg == NULL)
         pa_log("failed to make new info message");
     else {
-        state = active ? "active" : "inactive";
+        state = active ? POLICY_DBUS_STATE_ACT : POLICY_DBUS_STATE_INACT;
 
         success = dbus_message_append_args(msg,
                                            DBUS_TYPE_STRING, &type,

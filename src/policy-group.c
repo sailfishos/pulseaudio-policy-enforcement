@@ -13,6 +13,7 @@
 #include "source-output-ext.h"
 #include "classify.h"
 #include "dbusif.h"
+#include "variable.h"
 
 #define MUTE   1
 #define UNMUTE 0
@@ -333,6 +334,11 @@ struct pa_policy_group *pa_policy_group_new(struct userdata *u, const char *name
 
     pa_assert(u);
     pa_assert_se((gset = u->groups));
+
+    /* update variables */
+    pa_policy_var_update(u, name);
+    pa_policy_var_update(u, sinkname);
+    pa_policy_var_update(u, srcname);
 
     if ((group = find_group_by_name(gset, name, &idx)) != NULL)
         return group;
@@ -753,6 +759,7 @@ int pa_policy_group_move_to(struct userdata *u, const char *name,
     target.class = class;
     target.mode  = mode ? mode : "";
     target.hwid  = hwid ? hwid : "";
+    target.any   = NULL;
 
     switch (class) {
         
@@ -772,7 +779,10 @@ int pa_policy_group_move_to(struct userdata *u, const char *name,
     }
 
 
-    if (target.any != NULL) {
+    if (target.any == NULL) {
+        pa_log("pa_policy_group_move_to(): could not find %s for type %s name %s",
+               target_is_sink ? "sink" : "source", type, name);
+    } else {
         if (name) {             /* move the specified group only */
             if ((grp = find_group_by_name(u->groups, name, NULL)) != NULL) {
                 if (!(grp->flags & PA_POLICY_GROUP_FLAG_ROUTE_AUDIO))

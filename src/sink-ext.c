@@ -22,6 +22,7 @@
 #include "policy-group.h"
 #include "dbusif.h"
 #include "policy.h"
+#include "log.h"
 
 /* hooks */
 static pa_hook_result_t sink_put(void *, void *, void *);
@@ -415,60 +416,51 @@ static void handle_new_sink(struct userdata *u, struct pa_sink *sink)
 {
     const char *name;
     uint32_t  idx;
-    char      buf[1024];
-    int       len;
+    char      *buf;
     int       ret;
-    int       is_null_sink;
     struct pa_null_sink *ns;
     struct pa_sink_ext  *ext;
+    struct pa_classify_result *r;
 
     if (sink && u) {
         name = pa_sink_ext_get_name(sink);
         idx  = sink->index;
-        len  = pa_classify_sink(u, sink, 0,0, buf, sizeof(buf));
         ns   = u->nullsink;
 
-        if (strcmp(name, ns->name))
-            is_null_sink = false;
-        else {
+        if (!strcmp(name, ns->name)) {
             ns->sink = sink;
             pa_log_debug("new sink '%s' (idx=%d) will be used to "
                          "mute-by-route", name, idx);
-            is_null_sink = true;
         }
 
         pa_policy_context_register(u, pa_policy_object_sink, name, sink);
         pa_policy_activity_register(u, pa_policy_object_sink, name, sink);
 
-        if (len <= 0) {
-            if (!is_null_sink)
-                pa_log_debug("new sink '%s' (idx=%d)", name, idx);
-        }
-        else {
+        if (pa_policy_log_level_debug()) {
+            pa_classify_sink(u, sink, 0, 0, &r);
+            buf = pa_policy_log_concat(r->types, r->count);
             ret = pa_proplist_sets(sink->proplist,
                                    PA_PROP_POLICY_DEVTYPELIST, buf);
 
-            if (ret < 0) {
+            if (ret < 0)
                 pa_log("failed to set property '%s' on sink '%s'",
                        PA_PROP_POLICY_DEVTYPELIST, name);
-            }
-            else {
-                pa_log_debug("new sink '%s' (idx=%d) (type %s)",
-                             name, idx, buf);
 
-                ext = pa_xmalloc0(sizeof(struct pa_sink_ext));
-                pa_index_hash_add(u->hsnk, idx, ext);
-
-                pa_policy_groupset_update_default_sink(u, PA_IDXSET_INVALID);
-                pa_policy_groupset_register_sink(u, sink);
-
-                len = pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY,0,
-                                       buf, sizeof(buf));
-                if (len > 0) {
-                    pa_policy_send_device_state(u, PA_POLICY_CONNECTED, buf);
-                }
-            }
+            pa_log_debug("new sink '%s' (idx=%d%s%s)",
+                         name, idx, r->count > 0 ? ", type=" : "", buf);
+            pa_xfree(buf);
+            pa_xfree(r);
         }
+
+        ext = pa_xmalloc0(sizeof(struct pa_sink_ext));
+        pa_index_hash_add(u->hsnk, idx, ext);
+
+        pa_policy_groupset_update_default_sink(u, PA_IDXSET_INVALID);
+        pa_policy_groupset_register_sink(u, sink);
+
+        pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY, 0, &r);
+        pa_policy_send_device_state(u, PA_POLICY_CONNECTED, r);
+        pa_xfree(r);
     }
 }
 
@@ -476,15 +468,14 @@ static void handle_removed_sink(struct userdata *u, struct pa_sink *sink)
 {
     const char          *name;
     uint32_t             idx;
-    char                 buf[1024];
-    int                  len;
+    char                *buf;
     struct pa_null_sink *ns;
     struct pa_sink_ext  *ext;
+    struct pa_classify_result *r;
 
     if (sink && u) {
         name = pa_sink_ext_get_name(sink);
         idx  = sink->index;
-        len  = pa_classify_sink(u, sink, 0,0, buf, sizeof(buf));
         ns   = u->nullsink;
 
         if (ns->sink == sink) {
@@ -500,28 +491,28 @@ static void handle_removed_sink(struct userdata *u, struct pa_sink *sink)
         pa_policy_context_unregister(u, pa_policy_object_sink, name, sink,idx);
         pa_policy_activity_unregister(u, pa_policy_object_sink, name, sink,idx);
 
-        if (len <= 0)
-            pa_log_debug("remove sink '%s' (idx=%u)", name, idx);
-        else {
-            pa_log_debug("remove sink '%s' (idx=%d, type=%s)", name,idx, buf);
-
-            pa_policy_groupset_update_default_sink(u, idx);
-            pa_policy_groupset_unregister_sink(u, idx);
-
-            if ((ext = pa_index_hash_remove(u->hsnk, idx)) == NULL)
-                pa_log("no extension found for sink '%s' (idx=%u)",name,idx);
-            else {
-                pa_xfree(ext->overridden_port);
-                pa_xfree(ext);
-            }
-
-            len = pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY,0,
-                                   buf, sizeof(buf));
-            
-            if (len > 0) {
-                pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, buf);
-            }
+        if (pa_policy_log_level_debug()) {
+            pa_classify_sink(u, sink, 0, 0, &r);
+            buf = pa_policy_log_concat(r->types, r->count);
+            pa_log_debug("remove sink '%s' (idx=%d%s%s)",
+                         name, idx, r->count > 0 ? ", type=" : "", buf);
+            pa_xfree(buf);
+            pa_xfree(r);
         }
+
+        pa_policy_groupset_update_default_sink(u, idx);
+        pa_policy_groupset_unregister_sink(u, idx);
+
+        if ((ext = pa_index_hash_remove(u->hsnk, idx)) == NULL)
+            pa_log("no extension found for sink '%s' (idx=%u)",name, idx);
+        else {
+            pa_xfree(ext->overridden_port);
+            pa_xfree(ext);
+        }
+
+        pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY, 0, &r);
+        pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, r);
+        pa_xfree(r);
     }
 }
 

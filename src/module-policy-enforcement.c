@@ -29,6 +29,7 @@
 #include <meego/shared-data.h>
 
 #include "module-policy-enforcement-symdef.h"
+#include "log.h"
 #include "userdata.h"
 #include "index-hash.h"
 #include "config-file.h"
@@ -43,10 +44,7 @@
 #include "card-ext.h"
 #include "module-ext.h"
 #include "dbusif.h"
-
-#ifndef PA_DEFAULT_CONFIG_DIR
-#define PA_DEFAULT_CONFIG_DIR "/etc/pulse"
-#endif
+#include "variable.h"
 
 PA_MODULE_AUTHOR("Janos Kovacs");
 PA_MODULE_DESCRIPTION("Policy enforcement module");
@@ -61,7 +59,8 @@ PA_MODULE_USAGE(
     "null_sink_name=<name of the null sink> "
     "othermedia_preemption=<on|off> "
     "route_sources_first=<true|false> Default false "
-    "configdir=<configuration directory>"
+    "configdir=<configuration directory> "
+    "debug=<true|false> Default false"
 );
 
 static const char* const valid_modargs[] = {
@@ -74,6 +73,7 @@ static const char* const valid_modargs[] = {
     "othermedia_preemption",
     "route_sources_first",
     "configdir",
+    "debug",
     NULL
 };
 
@@ -90,6 +90,7 @@ int pa__init(pa_module *m) {
     const char      *preempt;
     bool             route_sources_first = false;
     const char      *cfgdir;
+    bool             debug = false;
     
     pa_assert(m);
     
@@ -112,6 +113,13 @@ int pa__init(pa_module *m) {
         goto fail;
     }
 
+    if (pa_modargs_get_value_boolean(ma, "debug", &debug) < 0) {
+        pa_log("Failed to parse \"debug\" parameter.");
+        goto fail;
+    }
+
+    pa_policy_log_init(debug);
+
     u = pa_xnew0(struct userdata, 1);
     m->userdata = u;
     u->core     = m->core;
@@ -130,6 +138,7 @@ int pa__init(pa_module *m) {
     u->classify = pa_classify_new(u);
     u->context  = pa_policy_context_new(u);
     u->dbusif   = pa_policy_dbusif_init(u, ifnam, mypath, pdpath, pdnam, route_sources_first);
+    u->vars     = pa_policy_var_init();
     u->shared   = pa_shared_data_get(u->core);
 
     if (u->scl == NULL      || u->ssnk == NULL     || u->ssrc == NULL ||
@@ -141,8 +150,7 @@ int pa__init(pa_module *m) {
 
     pa_policy_groupset_update_default_sink(u, PA_IDXSET_INVALID);
 
-    if (!pa_policy_parse_config_file(u, cfgfile) ||
-        !pa_policy_parse_files_in_configdir(u, cfgdir))
+    if (!pa_policy_parse_config_files(u, cfgfile, cfgdir))
         goto fail;
 
     if (pa_policy_group_find(u, PA_POLICY_DEFAULT_GROUP_NAME) == NULL) {
@@ -183,6 +191,7 @@ void pa__done(pa_module *m) {
         return;
     
     pa_policy_dbusif_done(u);
+    pa_policy_var_done(u->vars);
 
     pa_client_ext_subscription_free(u->scl);
     pa_sink_ext_subscription_free(u->ssnk);
@@ -202,18 +211,6 @@ void pa__done(pa_module *m) {
 
     
     pa_xfree(u);
-}
-
-
-/*
- * For the time being the prototype is in the userdata.h which is
- * not the best possible place for it
- */
-const char *pa_policy_file_path(const char *file, char *buf, size_t len)
-{
-    snprintf(buf, len, "%s/x%s", PA_DEFAULT_CONFIG_DIR, file);
-
-    return buf;
 }
 
 

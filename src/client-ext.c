@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pwd.h>
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -111,24 +112,52 @@ pid_t pa_client_ext_pid(struct pa_client *client)
 
 uid_t pa_client_ext_uid(struct pa_client *client)
 {
-    const char *uidstr;
-    uid_t       uid;
-    char       *e;
+    const char     *uidstr;
+    bool            valid;
+    struct passwd  *pwd;
+    uid_t           uid;
+    char           *e;
 
     assert(client);
 
-    uid = 0;
+    valid = false;
     uidstr = pa_proplist_gets(client->proplist,
                               PA_PROP_APPLICATION_PROCESS_USER);
 
-    if (uidstr != NULL) {
-        uid = strtoul(uidstr, &e, 10);
+    /* POSIX requires[0] that commands dealing with user id first attempt to
+     * resolve the specified string as a name, and only once that fails,
+     * then try to interpret the string as an ID. Due to this we'll behave
+     * the same way, first check for string then number.
+     *
+     * [0] https://www.gnu.org/software/coreutils/manual/coreutils.html#Disambiguating-names-and-IDs */
 
-        if (*e != '\0')
-            uid = 0;
+    /* first try to interpret user id as string */
+    if (uidstr) {
+        setpwent();
+
+        while ((pwd = getpwent())) {
+            if (!strcmp(uidstr, pwd->pw_name)) {
+                uid = pwd->pw_uid;
+                valid = true;
+                break;
+            }
+        }
+
+        endpwent();
     }
 
-    return uid;
+    /* if no user was found, interpret user id as number */
+    if (!valid && uidstr) {
+        uid = strtoul(uidstr, &e, 10);
+
+        if (*uidstr != '\0' && *e == '\0')
+            valid = true;
+    }
+
+    if (valid)
+        return uid;
+
+    return 0;
 }
 
 const char *pa_client_ext_exe(struct pa_client *client)

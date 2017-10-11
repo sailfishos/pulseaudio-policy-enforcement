@@ -28,6 +28,7 @@ struct pa_policy_groupset;
 struct pa_classify;
 struct pa_policy_context;
 struct pa_policy_dbusif;
+struct pa_policy_variable;
 
 struct userdata {
     pa_core                   *core;
@@ -46,14 +47,9 @@ struct userdata {
     struct pa_classify        *classify; /* rules for classification */
     struct pa_policy_context  *context;  /* for processing context variables */
     struct pa_policy_dbusif   *dbusif;
+    struct pa_policy_variable *vars;
     pa_shared_data            *shared;   /* for forwarding context etc properties */
 };
-
-
-/*
- * Some day this should go to a better place
- */
-const char *pa_policy_file_path(const char *file, char *buf, size_t len);
 
 
 #endif

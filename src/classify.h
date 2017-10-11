@@ -11,7 +11,8 @@
 #define PA_POLICY_PID_HASH_MASK  (PA_POLICY_PID_HASH_MAX - 1)
 
 /* card flags */
-#define PA_POLICY_DISABLE_NOTIFY (1UL << 0)
+#define PA_POLICY_DISABLE_NOTIFY            (1UL << 0)
+#define PA_POLICY_NOTIFY_PROFILE_CHANGED    (1UL << 1)
 
 /* stream flags */
 #define PA_POLICY_LOCAL_ROUTE    (1UL << 0)
@@ -47,7 +48,7 @@ enum pa_classify_method {
 };
 
 union pa_classify_arg {
-    const char *string;
+    char       *string;
     regex_t     rexp;
 };
 
@@ -106,7 +107,7 @@ struct pa_classify_device_data {
 };
 
 struct pa_classify_device_def {
-    const char                      *type;  /* device type, e.g. ihf */
+    char                            *type;  /* device type, e.g. ihf */
                                             /* for classification */
     char                            *prop;  /*   sink/source property */
     int                            (*method)(const char *,
@@ -128,7 +129,7 @@ struct pa_classify_card_data {
 };
 
 struct pa_classify_card_def {
-    const char                  *type; /* handled device name, e.g ihf */
+    char                        *type;    /* handled device name, e.g ihf */
     struct pa_classify_card_data data[2]; /* data associated with device 'type' */
 };
 
@@ -153,6 +154,10 @@ struct pa_classify {
     pa_hook_slot                *module_unlink_hook_slot;
 };
 
+struct pa_classify_result {
+    uint32_t    count;
+    const char *types[1];
+};
 
 struct pa_classify *pa_classify_new(struct userdata *);
 void  pa_classify_free(struct userdata *u);
@@ -188,11 +193,11 @@ const char *pa_classify_source_output_by_data(struct userdata *u,
                                         struct pa_source_output_new_data *data);
 
 int   pa_classify_sink(struct userdata *, struct pa_sink *,
-                       uint32_t, uint32_t, char *, int);
+                       uint32_t, uint32_t, struct pa_classify_result **result);
 int   pa_classify_source(struct userdata *, struct pa_source *,
-                         uint32_t, uint32_t, char *, int);
+                         uint32_t, uint32_t, struct pa_classify_result **result);
 int   pa_classify_card(struct userdata *, struct pa_card *,
-                       uint32_t, uint32_t, char *, int, bool);
+                       uint32_t, uint32_t, bool, struct pa_classify_result **result);
 
 int   pa_classify_is_sink_typeof(struct userdata *, struct pa_sink *,
                                  const char *,
