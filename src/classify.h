@@ -104,6 +104,7 @@ struct pa_classify_device_data {
                              * is activated that module is loaded. */
     char       *module_args;
     uint32_t    flags; /* PA_POLICY_DISABLE_NOTIFY, etc */
+    uint32_t    port_change_delay;  /* Used if delayed port change is set */
 };
 
 struct pa_classify_device_def {
@@ -164,7 +165,7 @@ void  pa_classify_free(struct userdata *u);
 void  pa_classify_add_sink(struct userdata *, const char *, const char *,
                            enum pa_classify_method, const char *, pa_hashmap *,
                            const char *module, const char *module_args,
-                           uint32_t);
+                           uint32_t flags, uint32_t port_change_delay);
 void  pa_classify_add_source(struct userdata *, const char *, const char *,
                              enum pa_classify_method, const char *, pa_hashmap *,
                              const char *module, const char *module_args,

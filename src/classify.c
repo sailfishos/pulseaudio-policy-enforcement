@@ -12,6 +12,7 @@
 #include <pulsecore/strbuf.h>
 #include <pulsecore/core.h>
 #include <pulsecore/hook-list.h>
+#include <pulse/timeval.h>
 
 #include "classify.h"
 #include "policy-group.h"
@@ -61,7 +62,7 @@ static void devices_add(struct userdata *,
                         struct pa_classify_device **, const char *,
                         const char *,  enum pa_classify_method, const char *, pa_hashmap *,
                         const char *module, const char *module_args,
-                        uint32_t);
+                        uint32_t, uint32_t);
 static int devices_classify(struct pa_classify_device *, pa_proplist *,
                             const char *, uint32_t, uint32_t, struct pa_classify_result **result);
 static int devices_is_typeof(struct pa_classify_device_def *, pa_proplist *,
@@ -153,7 +154,7 @@ void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop
                           enum pa_classify_method method, const char *arg,
                           pa_hashmap *ports,
                           const char *module, const char *module_args,
-                          uint32_t flags)
+                          uint32_t flags, uint32_t port_change_delay)
 {
     struct pa_classify *classify;
 
@@ -165,7 +166,7 @@ void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop
     pa_assert(arg);
 
     devices_add(u, &classify->sinks, type, prop, method, arg, ports,
-                module, module_args, flags);
+                module, module_args, flags, port_change_delay);
 }
 
 void pa_classify_add_source(struct userdata *u, const char *type, const char *prop,
@@ -184,7 +185,7 @@ void pa_classify_add_source(struct userdata *u, const char *type, const char *pr
     pa_assert(arg);
 
     devices_add(u, &classify->sources, type, prop, method, arg, ports,
-                module, module_args, flags);
+                module, module_args, flags, 0);
 }
 
 void pa_classify_add_card(struct userdata *u, char *type,
@@ -1171,7 +1172,7 @@ static void devices_free(struct pa_classify_device *devices)
 static void devices_add(struct userdata *u, struct pa_classify_device **p_devices, const char *type,
                         const char *prop, enum pa_classify_method method, const char *arg,
                         pa_hashmap *ports, const char *module, const char *module_args,
-                        uint32_t flags)
+                        uint32_t flags, uint32_t port_change_delay)
 {
     struct pa_classify_device *devs;
     struct pa_classify_device_def *d;
@@ -1242,6 +1243,7 @@ static void devices_add(struct userdata *u, struct pa_classify_device **p_device
                                                                u->classify);
 
     d->data.flags = flags;
+    d->data.port_change_delay = port_change_delay * PA_USEC_PER_MSEC;
 
     switch (method) {
 
