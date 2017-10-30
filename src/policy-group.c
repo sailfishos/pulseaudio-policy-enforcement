@@ -46,7 +46,7 @@ static pa_volume_t       dbtbl[300];
 static int move_group(struct pa_policy_group *, struct target *);
 static int volset_group(struct userdata *, struct pa_policy_group *,
                         pa_volume_t);
-static int mute_group_by_route(struct pa_policy_group *,
+static int mute_group_by_route(struct userdata *u, struct pa_policy_group *,
                                int, struct pa_null_sink *);
 static int mute_group_locally(struct userdata *, struct pa_policy_group *,int);
 static int cork_group(struct userdata *u, struct pa_policy_group *, int);
@@ -301,7 +301,7 @@ void pa_policy_groupset_create_default_group(struct userdata *u,
     pa_log_info("group '%s' preemption is %s", name,
                 (flags & PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY) ? "on" : "off");
 
-    gset->dflt = pa_policy_group_new(u, name, NULL, NULL, NULL, flags);
+    gset->dflt = pa_policy_group_new(u, name, NULL, 0, NULL, NULL, NULL, flags);
 }
 
 int pa_policy_groupset_restore_volume(struct userdata *u, struct pa_sink *sink)
@@ -322,9 +322,9 @@ int pa_policy_groupset_restore_volume(struct userdata *u, struct pa_sink *sink)
     return ret;
 }
 
-
 struct pa_policy_group *pa_policy_group_new(struct userdata *u, const char *name,
-                                            const char *sinkname, const char *srcname,
+                                            const char *sinkname, enum pa_classify_method method, const char *arg,
+                                            const char *srcname,
                                             pa_proplist *properties,
                                             uint32_t flags)
 {
@@ -349,9 +349,27 @@ struct pa_policy_group *pa_policy_group_new(struct userdata *u, const char *name
     group->flags    = flags;
     group->name     = pa_xstrdup(name);
     group->limit    = PA_VOLUME_NORM;
-    group->sinkname = sinkname ? pa_xstrdup(sinkname) : NULL;
-    group->sink     = sinkname ? NULL : defsink;
-    group->sinkidx  = sinkname ? PA_IDXSET_INVALID : defsinkidx;
+    if (group->flags & PA_POLICY_GROUP_FLAG_DYNAMIC_SINK) {
+        group->method.type = method;
+        group->arg.string = pa_xstrdup(arg ? pa_policy_var(u, arg) : "");
+        switch (method) {
+            case pa_method_equals:
+                group->method.func = pa_classify_method_equals;
+                break;
+            case pa_method_startswith:
+                group->method.func = pa_classify_method_startswith;
+                break;
+            default:
+            case pa_method_matches:
+            case pa_method_true:
+                pa_assert_not_reached();
+                break;
+        }
+    } else {
+        group->sinkname = sinkname ? pa_xstrdup(sinkname) : NULL;
+        group->sink     = sinkname ? NULL : defsink;
+        group->sinkidx  = sinkname ? PA_IDXSET_INVALID : defsinkidx;
+    }
     group->srcname  = srcname  ? pa_xstrdup(srcname) : NULL;
     group->source   = srcname  ? NULL : defsource;
     group->srcidx   = srcname  ? PA_IDXSET_INVALID : defsrcidx;
@@ -439,6 +457,7 @@ void pa_policy_group_free(struct pa_policy_groupset *gset, const char *name)
 
                 pa_xfree(group->name);
                 pa_xfree(group->sinkname);
+                pa_xfree(group->arg.string);
                 pa_xfree(group->portname);
                 pa_xfree(group->srcname);
                 if (group->properties)
@@ -950,7 +969,7 @@ int pa_policy_group_volume_limit(struct userdata *u, const char *name,
                     ret = volset_group(u, group, percent);
                 else {
                     mute = percent > 0 ? false : true;
-                    ret  = mute_group_by_route(group, mute, ns); 
+                    ret  = mute_group_by_route(u, group, mute, ns);
                     
                     if (!mute)
                         volset_group(u, group, percent);
@@ -1207,7 +1226,24 @@ static int volset_group(struct userdata        *u,
 }
 
 
-static int mute_group_by_route(struct pa_policy_group *group,
+pa_sink *pa_policy_group_find_sink(struct userdata *u, struct pa_policy_group *group)
+{
+    uint32_t idx = 0;
+    pa_sink *sink;
+
+    if (group->flags & PA_POLICY_GROUP_FLAG_DYNAMIC_SINK) {
+        PA_IDXSET_FOREACH(sink, u->core->sinks, idx) {
+            if (group->method.func(sink->name, &group->arg))
+                return sink;
+        }
+    }
+
+    return NULL;
+}
+
+
+static int mute_group_by_route(struct userdata        *u,
+                               struct pa_policy_group *group,
                                int                     mute,
                                struct pa_null_sink    *ns)
 {

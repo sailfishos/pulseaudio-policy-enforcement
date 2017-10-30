@@ -5,6 +5,7 @@
 #include <pulsecore/sink.h>
 
 #include "userdata.h"
+#include "classify.h"
 
 #define PA_POLICY_GROUP_HASH_BITS 6
 #define PA_POLICY_GROUP_HASH_DIM  (1 << PA_POLICY_GROUP_HASH_BITS)
@@ -20,6 +21,7 @@
 #define PA_POLICY_GROUP_FLAG_CORK_STREAM   PA_POLICY_GROUP_BIT(4)
 #define PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY  PA_POLICY_GROUP_BIT(5)
 #define PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE PA_POLICY_GROUP_BIT(6)
+#define PA_POLICY_GROUP_FLAG_DYNAMIC_SINK  PA_POLICY_GROUP_BIT(7)
 
 #define PA_POLICY_GROUP_FLAGS_CLIENT      (PA_POLICY_GROUP_FLAG_LIMIT_VOLUME |\
                                            PA_POLICY_GROUP_FLAG_CORK_STREAM  )
@@ -46,6 +48,11 @@ struct pa_policy_group {
     char                         *portname; /* name of the default port */
     struct pa_sink               *sink;     /* default sink for the group */
     uint32_t                      sinkidx;  /* index of the default sink */
+    struct {
+        enum pa_classify_method type;
+        int                   (*func)(const char *,union pa_classify_arg *);
+    }                            method;
+    union pa_classify_arg        arg;       /* argument */
     char                         *srcname;  /* name of the default source */
     struct pa_source             *source;   /* default source fror the group */
     uint32_t                      srcidx;   /* index of the default source */
@@ -85,7 +92,8 @@ void pa_policy_groupset_create_default_group(struct userdata *, const char *);
 int pa_policy_groupset_restore_volume(struct userdata *, struct pa_sink *);
 
 struct pa_policy_group *pa_policy_group_new(struct userdata *, const char*,
-                                            const char *, const char *, pa_proplist*, uint32_t);
+                                            const char *sink, enum pa_classify_method method, const char *arg,
+                                            const char *source, pa_proplist*, uint32_t);
 void pa_policy_group_free(struct pa_policy_groupset *, const char *);
 struct pa_policy_group *pa_policy_group_find(struct userdata *, const char *);
 
@@ -107,6 +115,8 @@ int  pa_policy_group_start_move_all(struct userdata *u);
 void pa_policy_group_assert_moving(struct userdata *u);
 int  pa_policy_group_cork(struct userdata *u, const char *, int);
 int  pa_policy_group_volume_limit(struct userdata *, const char *, uint32_t);
+
+pa_sink *pa_policy_group_find_sink(struct userdata *u, struct pa_policy_group *group);
 
 #endif
 
