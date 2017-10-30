@@ -1420,9 +1420,7 @@ static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_
         sts = -1;
     else {
         sts = 0;
-
-        if ((value = strchr(line, '=')) == NULL ||
-             strlen(value) < 2) {
+        if ((value = strchr(line, '=')) == NULL) {
             pa_log("invalid definition '%s' in line %d", line, lineno);
             sts = -1;
         } else {
