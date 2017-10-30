@@ -103,6 +103,8 @@ struct ctxact {                          /* context rule actions */
 struct groupdef {
     char                    *name;
     char                    *sink;
+    enum pa_classify_method  method;
+    char                    *arg;
     char                    *source;
     pa_proplist             *properties;
     char                    *flags;
@@ -203,6 +205,7 @@ static int contextdef_parse(int, char *, struct contextdef *);
 static int activitydef_parse(int, char *, struct activitydef *);
 static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_value);
 
+static int groupdev_parse(int lineno, enum device_class class, char *devdef, struct groupdef *grpdef);
 static int deviceprop_parse(int, enum device_class,char *,struct devicedef *);
 static int ports_parse(int, const char *, struct devicedef *);
 static int module_parse(int, const char *, struct devicedef *);
@@ -850,7 +853,7 @@ static int section_close(struct userdata *u, struct section *sec)
             flags_parse(u, grdef->flags_lineno, grdef->flags, section_group, &flags);
 
             /* Transfer ownership of grdef->properties */
-            pa_policy_group_new(u, grdef->name,   grdef->sink,
+            pa_policy_group_new(u, grdef->name,   grdef->sink, grdef->method, grdef->arg,
                                    grdef->source, grdef->properties,
                                    flags);
 
@@ -1109,7 +1112,10 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
                 grdef->name = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "sink=", 5)) {
-            grdef->sink = pa_xstrdup(line+5);
+            if (!strncmp(line+5, "name@", 5))
+                sts = groupdev_parse(lineno, device_sink, line+10, grdef);
+            else
+                grdef->sink = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "source=", 7)) {
             grdef->source = pa_xstrdup(line+7);
@@ -1479,6 +1485,37 @@ static int deviceprop_parse(int lineno, enum device_class class,
     
     return 0;
 }
+
+static int groupdev_parse(int lineno, enum device_class class,
+                          char *devdef, struct groupdef *grpdef)
+{
+    char *colon;
+    char *method;
+    char *arg;
+
+    if ((colon = strchr(devdef, ':')) == NULL) {
+        pa_log("invalid definition '%s' in line %d", devdef, lineno);
+        return -1;
+    }
+
+    *colon = '\0';
+    method = devdef;
+    arg    = colon + 1;
+
+    if (!strcmp(method, "equals"))
+        grpdef->method = pa_method_equals;
+    else if (!strcmp(method, "startswith"))
+        grpdef->method = pa_method_startswith;
+    else {
+        pa_log("invalid method '%s' in line %d", method, lineno);
+        return -1;
+    }
+
+    grpdef->arg    = pa_xstrdup(arg);
+
+    return 0;
+}
+
 
 static int ports_parse(int lineno, const char *portsdef,
                        struct devicedef *devdef)
@@ -2082,6 +2119,8 @@ static int flags_parse(struct userdata  *u,
             flags |= PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE;
         else if (group && !strcmp(flagname, "media_notify"))
             flags |= PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY;
+        else if (group && !strcmp(flagname, "dynamic_sink"))
+            flags |= PA_POLICY_GROUP_FLAG_DYNAMIC_SINK;
         else if (strlen(flagname) > 0)
             pa_log("invalid flag '%s' in line %d", flagname, lineno);
     }
