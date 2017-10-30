@@ -38,6 +38,8 @@
 #define DEFAULT_CONFIG_FILE        "xpolicy.conf"
 #define DEFAULT_CONFIG_DIRECTORY   "/etc/pulse/xpolicy.conf.d"
 
+#define DEFAULT_PORT_CHANGE_DELAY_MS (200)
+
 enum section_type {
     section_unknown = 0,
     section_group,
@@ -117,6 +119,8 @@ struct devicedef {
                                      * pa_classify_port_entry. */
     char                    *module;
     char                    *module_args;
+    char                    *delay;
+    int                      delay_lineno;
     char                    *flags;
     int                      flags_lineno;
 };
@@ -211,6 +215,7 @@ static int contextoverride_parse(int lineno, char *setdefdef, int *nact, struct 
 static int contextanyprop_parse(int, char *, char *, struct anyprop *);
 static int cardname_parse(int, char *, struct carddef *, int field);
 static int flags_parse(struct userdata *u, int, const char *, enum section_type, uint32_t *);
+static void delay_parse(struct userdata *u, int, const char *, uint32_t *);
 static int valid_label(int, char *);
 const char *policy_file_path(const char *file, char *buf, size_t len);
 
@@ -709,6 +714,7 @@ static void section_free(struct section *sec) {
             pa_xfree(sec->def.device->module);
             pa_xfree(sec->def.device->module_args);
             pa_xfree(sec->def.device->flags);
+            pa_xfree(sec->def.device->delay);
             pa_xfree(sec->def.device);
             break;
 
@@ -826,6 +832,7 @@ static int section_close(struct userdata *u, struct section *sec)
     struct setprop    *setprop;
     struct delprop    *delprop;
     struct setdef     *setdef;
+    uint32_t           delay = DEFAULT_PORT_CHANGE_DELAY_MS;
     uint32_t           card_flags[2] = { 0, 0};
     uint32_t           flags = 0;
     int                status = 0;
@@ -854,6 +861,7 @@ static int section_close(struct userdata *u, struct section *sec)
             devdef = sec->def.device;
 
             flags_parse(u, devdef->flags_lineno, devdef->flags, section_device, &flags);
+            delay_parse(u, devdef->delay_lineno, devdef->delay, &delay);
 
             switch (devdef->class) {
 
@@ -863,7 +871,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                      devdef->prop, devdef->method, devdef->arg,
                                      devdef->ports,
                                      devdef->module, devdef->module_args,
-                                     flags);
+                                     flags, delay);
                 break;
 
             case device_source:
@@ -1155,6 +1163,10 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
         }
         else if (!strncmp(line, "module=", 7)) {
             sts = module_parse(lineno, line+7, devdef);
+        }
+        else if (!strncmp(line, "delay=", 6)) {
+            devdef->delay = pa_xstrdup(line+6);
+            devdef->delay_lineno = lineno;
         }
         else if (!strncmp(line, "flags=", 6)) {
             devdef->flags = pa_xstrdup(line+6);
@@ -1569,6 +1581,21 @@ static int module_parse(int lineno, const char *portsdef,
         pa_log_warn("Empty module= definition in line %d", lineno);
 
     return 0;
+}
+
+static void delay_parse(struct userdata *u, int lineno,
+                        const char *delaydef, uint32_t *delay)
+{
+    char *end;
+
+    pa_assert(delay);
+
+    if (delaydef && *delaydef != '\0') {
+        pa_policy_var_update(u, delaydef);
+        *delay = strtoul(delaydef, &end, 10);
+        if (*end != '\0')
+            *delay = 0;
+    }
 }
 
 static int streamprop_parse(int lineno,char *propdef,struct streamdef *strdef)
