@@ -47,13 +47,13 @@ static struct pa_classify_pid_hash
                            struct pa_classify_pid_hash **);
 
 static void streams_free(struct pa_classify_stream_def *);
-static void streams_add(struct pa_classify_stream_def **, const char *,
+static void streams_add(struct userdata *u, struct pa_classify_stream_def **, const char *,
                         enum pa_classify_method, const char *, const char *,
                         const char *, uid_t, const char *, const char *, uint32_t);
-static const char *streams_get_group(struct pa_classify_stream_def **, pa_proplist *,
+static const char *streams_get_group(struct userdata *u, struct pa_classify_stream_def **, pa_proplist *,
                                      const char *, uid_t, const char *, uint32_t *);
 static struct pa_classify_stream_def
-            *streams_find(struct pa_classify_stream_def **, pa_proplist *,
+            *streams_find(struct userdata *u, struct pa_classify_stream_def **, pa_proplist *,
                           const char *, const char *, uid_t, const char *,
                           struct pa_classify_stream_def **);
 
@@ -237,7 +237,7 @@ void pa_classify_add_stream(struct userdata *u, const char *prop,
             }
         }
 
-        streams_add(&classify->streams.defs, prop,method,arg,
+        streams_add(u, &classify->streams.defs, prop,method,arg,
                     clnam, sname, uid, exe, grnam, flags);
     }
 }
@@ -693,7 +693,7 @@ static const char *find_group_for_client(struct userdata  *u,
         if (!(exe = pa_proplist_gets(proplist, PA_PROP_APPLICATION_PROCESS_BINARY)))
             exe = "";
 
-        group = streams_get_group(defs, proplist, clnam, uid, exe, &flags);
+        group = streams_get_group(u, defs, proplist, clnam, uid, exe, &flags);
     } else {
         pid = pa_client_ext_pid(client);
 
@@ -702,7 +702,7 @@ static const char *find_group_for_client(struct userdata  *u,
             uid   = pa_client_ext_uid(client);
             exe   = pa_client_ext_exe(client);
 
-            group = streams_get_group(defs, proplist, clnam, uid, exe, &flags);
+            group = streams_get_group(u, defs, proplist, clnam, uid, exe, &flags);
         }
     }
 
@@ -956,7 +956,7 @@ static void streams_free(struct pa_classify_stream_def *defs)
     }
 }
 
-static void streams_add(struct pa_classify_stream_def **defs, const char *prop,
+static void streams_add(struct userdata *u, struct pa_classify_stream_def **defs, const char *prop,
                         enum pa_classify_method method, const char *arg, const char *clnam,
                         const char *sname, uid_t uid, const char *exe, const char *group, uint32_t flags)
 {
@@ -974,7 +974,7 @@ static void streams_add(struct pa_classify_stream_def **defs, const char *prop,
         pa_proplist_sets(proplist, prop, arg);
     }
 
-    if ((d = streams_find(defs, proplist, clnam, sname, uid, exe, &prev)) != NULL) {
+    if ((d = streams_find(u, defs, proplist, clnam, sname, uid, exe, &prev)) != NULL) {
         pa_log_info("redefinition of stream");
         pa_xfree(d->group);
     }
@@ -1045,7 +1045,8 @@ static void streams_add(struct pa_classify_stream_def **defs, const char *prop,
     pa_proplist_free(proplist);
 }
 
-static const char *streams_get_group(struct pa_classify_stream_def **defs,
+static const char *streams_get_group(struct userdata *u,
+                                     struct pa_classify_stream_def **defs,
                                      pa_proplist *proplist,
                                      const char *clnam, uid_t uid, const char *exe,
                                      uint32_t *flags_ret)
@@ -1056,7 +1057,7 @@ static const char *streams_get_group(struct pa_classify_stream_def **defs,
 
     pa_assert(defs);
 
-    if ((d = streams_find(defs, proplist, clnam, NULL, uid, exe, NULL)) == NULL) {
+    if ((d = streams_find(u, defs, proplist, clnam, NULL, uid, exe, NULL)) == NULL) {
         group = NULL;
         flags = 0;
     }
@@ -1071,8 +1072,26 @@ static const char *streams_get_group(struct pa_classify_stream_def **defs,
     return group;
 }
 
+static bool group_sink_is_active(struct userdata *u, const char *group_name)
+{
+    struct pa_policy_group *group;
+    pa_sink *sink;
+
+    if ((group = pa_policy_group_find(u, group_name))) {
+        if (!(group->flags & PA_POLICY_GROUP_FLAG_DYNAMIC_SINK))
+            return true;
+
+        if ((sink = pa_policy_group_find_sink(u, group))) {
+            pa_log_debug("sink %s is %srunning", sink->name, pa_sink_get_state(sink) == PA_SINK_RUNNING ? "" : "not ");
+            return pa_sink_get_state(sink) == PA_SINK_RUNNING;
+        }
+    }
+
+    return false;
+}
+
 static struct pa_classify_stream_def *
-streams_find(struct pa_classify_stream_def **defs, pa_proplist *proplist,
+streams_find(struct userdata *u, struct pa_classify_stream_def **defs, pa_proplist *proplist,
              const char *clnam, const char *sname, uid_t uid, const char *exe,
              struct pa_classify_stream_def **prev_ret)
 {
@@ -1112,7 +1131,7 @@ streams_find(struct pa_classify_stream_def **defs, pa_proplist *proplist,
             ID_MATCH_OF(uid)       &&
             /* case for dynamically changing active sink. */
             (!sname || (sname && d->sname && !strcmp(sname, d->sname))) &&
-            (d->sact == -1 || d->sact == 1) &&
+            ((d->sact == -1 || d->sact == 1) && group_sink_is_active(u, d->group)) &&
             /* end special case */
             STRING_MATCH_OF(exe)      )
             break;
