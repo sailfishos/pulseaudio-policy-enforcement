@@ -31,6 +31,8 @@
 #define PA_POLICY_MODULE_FOR_SOURCE (1)
 #define PA_POLICY_MODULE_COUNT      (2)
 
+#define PA_POLICY_CARD_MAX_DEFS     (2)
+
 struct pa_sink;
 struct pa_source;
 struct pa_sink_input;
@@ -171,7 +173,8 @@ void  pa_classify_add_source(struct userdata *, const char *, const char *,
                              const char *module, const char *module_args,
                              uint32_t);
 void  pa_classify_add_card(struct userdata *, char *,
-                           enum pa_classify_method[2], char **, char **, uint32_t[2]);
+                           enum pa_classify_method[PA_POLICY_CARD_MAX_DEFS], char **, char **,
+                           uint32_t[PA_POLICY_CARD_MAX_DEFS]);
 void  pa_classify_add_stream(struct userdata *, const char *,enum pa_classify_method,
                              const char *, const char *, const char *, uid_t, const char *, const char *,
                              uint32_t, const char *);

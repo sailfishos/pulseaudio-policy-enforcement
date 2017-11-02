@@ -73,7 +73,8 @@ static int devices_is_typeof(struct pa_classify_device_def *, pa_proplist *,
 static void card_def_free(struct pa_classify_card_def *d);
 static void cards_free(struct pa_classify_card *);
 static void cards_add(struct userdata *u, struct pa_classify_card **, const char *,
-                      enum pa_classify_method[2], char **, char **, uint32_t[2]);
+                      enum pa_classify_method[PA_POLICY_CARD_MAX_DEFS], char **, char **,
+                      uint32_t[PA_POLICY_CARD_MAX_DEFS]);
 static int  cards_classify(struct pa_classify_card *, const char *, pa_hashmap *card_profiles,
                            uint32_t,uint32_t, bool reclassify, struct pa_classify_result **result);
 static int card_is_typeof(struct pa_classify_card_def *, const char *,
@@ -191,8 +192,8 @@ void pa_classify_add_source(struct userdata *u, const char *type, const char *pr
 }
 
 void pa_classify_add_card(struct userdata *u, char *type,
-                          enum pa_classify_method method[2], char **arg,
-                          char **profiles, uint32_t flags[2])
+                          enum pa_classify_method method[PA_POLICY_CARD_MAX_DEFS], char **arg,
+                          char **profiles, uint32_t flags[PA_POLICY_CARD_MAX_DEFS])
 {
     struct pa_classify *classify;
 
@@ -1384,7 +1385,7 @@ static void card_def_free(struct pa_classify_card_def *d)
 
     pa_xfree(d->type);
 
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < PA_POLICY_CARD_MAX_DEFS; i++) {
         pa_xfree(d->data[i].profile);
 
         if (d->data[i].method == pa_classify_method_matches)
@@ -1407,8 +1408,8 @@ static void cards_free(struct pa_classify_card *cards)
 }
 
 static void cards_add(struct userdata *u, struct pa_classify_card **p_cards,
-                      const char *type, enum pa_classify_method method[2], char **arg,
-                      char **profiles, uint32_t flags[2])
+                      const char *type, enum pa_classify_method method[PA_POLICY_CARD_MAX_DEFS],
+                      char **arg, char **profiles, uint32_t flags[PA_POLICY_CARD_MAX_DEFS])
 {
     struct pa_classify_card *cards;
     struct pa_classify_card_def *d;
@@ -1444,7 +1445,7 @@ static void cards_add(struct userdata *u, struct pa_classify_card **p_cards,
 
     d->type    = pa_xstrdup(type);
 
-    for (i = 0; i < 2 && profiles[i]; i++) {
+    for (i = 0; i < PA_POLICY_CARD_MAX_DEFS && profiles[i]; i++) {
 
         data = &d->data[i];
 
@@ -1511,7 +1512,7 @@ static int cards_classify(struct pa_classify_card *cards,
 
         /* Check for both data[0] and data[1] */
 
-        for (i = 0; i < 2 && d->data[i].profile; i++) {
+        for (i = 0; i < PA_POLICY_CARD_MAX_DEFS && d->data[i].profile; i++) {
 
             data = &d->data[i];
 
@@ -1548,7 +1549,7 @@ static int card_is_typeof(struct pa_classify_card_def *defs, const char *name,
     for (d = defs;  d->type;  d++) {
         if (!strcmp(type, d->type)) {
 
-            for (i = 0; i < 2 && d->data[i].profile; i++) {
+            for (i = 0; i < PA_POLICY_CARD_MAX_DEFS && d->data[i].profile; i++) {
                 if (d->data[i].method(name, &d->data[i].arg)) {
                     if (data != NULL)
                         *data = &d->data[i];

@@ -723,7 +723,7 @@ static void section_free(struct section *sec) {
 
         case section_card:
             pa_xfree(sec->def.card->type);
-            for (i = 0; i < 2; i++) {
+            for (i = 0; i < PA_POLICY_CARD_MAX_DEFS; i++) {
                 pa_xfree(sec->def.card->arg[i]);
                 pa_xfree(sec->def.card->profile[i]);
                 pa_xfree(sec->def.card->flags[i]);
@@ -896,7 +896,7 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             carddef = sec->def.card;
 
-            for (i = 0; i < 2; i++)
+            for (i = 0; i < PA_POLICY_CARD_MAX_DEFS; i++)
                 flags_parse(u, carddef->flags_lineno[i], carddef->flags[i], section_card, &card_flags[i]);
 
             pa_classify_add_card(u, carddef->type, carddef->method,
