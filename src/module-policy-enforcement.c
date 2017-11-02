@@ -168,6 +168,9 @@ int pa__init(pa_module *m) {
     pa_source_output_ext_discover(u);
     pa_card_ext_discover(u);
     pa_module_ext_discover(u);
+    /* variables are not used after initialization */
+    pa_policy_var_done(u->vars);
+    u->vars = NULL;
 
     pa_modargs_free(ma);
     

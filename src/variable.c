@@ -44,6 +44,7 @@ const char *pa_policy_var(struct userdata *u, const char *value)
     const char *r;
 
     pa_assert(u);
+    pa_assert(u->vars);
 
     r = value;
 
@@ -62,7 +63,8 @@ struct pa_policy_variable *pa_policy_var_init()
 
 void pa_policy_var_done(struct pa_policy_variable *vars)
 {
-    pa_assert(vars);
+    if (!vars)
+        return;
 
     if (vars->variables)
         pa_hashmap_free(vars->variables);
