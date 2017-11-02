@@ -4,6 +4,7 @@
 
 #include <pulse/xmalloc.h>
 #include <pulsecore/hashmap.h>
+#include <pulsecore/core-util.h>
 
 #include "variable.h"
 
@@ -13,6 +14,9 @@ struct pa_policy_variable {
 
 void  pa_policy_var_add(struct userdata *u, const char *var, const char *value)
 {
+    bool update = false;
+    const char *old_value;
+
     pa_assert(u);
     pa_assert(u->vars);
 
@@ -22,12 +26,15 @@ void  pa_policy_var_add(struct userdata *u, const char *var, const char *value)
                                                  pa_xfree,
                                                  pa_xfree);
 
-    if (pa_hashmap_get(u->vars->variables, var)) {
-        pa_hashmap_remove_and_free(u->vars->variables, var);
-        pa_log_debug("variable updated (%s|%s)", var, value);
-    } else
-        pa_log_debug("variable added (%s|%s)", var, value);
+    if ((old_value = pa_hashmap_get(u->vars->variables, var))) {
+        if (pa_streq(old_value, value))
+            return;
 
+        pa_hashmap_remove_and_free(u->vars->variables, var);
+        update = true;
+    }
+
+    pa_log_debug("variable %s (%s|%s)", update ? "updated" : "added", var, value);
     pa_hashmap_put(u->vars->variables, pa_xstrdup(var), pa_xstrdup(value));
 }
 
