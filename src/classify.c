@@ -57,6 +57,7 @@ static struct pa_classify_stream_def
                           const char *, const char *, uid_t, const char *,
                           struct pa_classify_stream_def **);
 
+static void device_def_free(struct pa_classify_device_def *d);
 static void devices_free(struct pa_classify_device *);
 static void devices_add(struct userdata *,
                         struct pa_classify_device **, const char *,
@@ -69,6 +70,7 @@ static int devices_is_typeof(struct pa_classify_device_def *, pa_proplist *,
                              const char *, const char *,
                              struct pa_classify_device_data **);
 
+static void card_def_free(struct pa_classify_card_def *d);
 static void cards_free(struct pa_classify_card *);
 static void cards_add(struct userdata *u, struct pa_classify_card **, const char *,
                       enum pa_classify_method[2], char **, char **, uint32_t[2]);
@@ -1164,25 +1166,31 @@ void pa_classify_port_entry_free(struct pa_classify_port_entry *port) {
     pa_xfree(port);
 }
 
+static void device_def_free(struct pa_classify_device_def *d)
+{
+    pa_assert(d);
+
+    pa_xfree(d->type);
+
+    if (d->data.ports)
+        pa_hashmap_free(d->data.ports);
+
+    if (d->method == pa_classify_method_matches)
+        regfree(&d->arg.rexp);
+    else
+        pa_xfree(d->arg.string);
+
+    pa_xfree(d->data.module);
+        pa_xfree(d->data.module_args);
+}
+
 static void devices_free(struct pa_classify_device *devices)
 {
     struct pa_classify_device_def *d;
 
     if (devices) {
-        for (d = devices->defs;  d->type;  d++) {
-            pa_xfree(d->type);
-
-            if (d->data.ports)
-                pa_hashmap_free(d->data.ports);
-
-            if (d->method == pa_classify_method_matches)
-                regfree(&d->arg.rexp);
-            else
-                pa_xfree(d->arg.string);
-
-            pa_xfree(d->data.module);
-            pa_xfree(d->data.module_args);
-        }
+        for (d = devices->defs;  d->type;  d++)
+            device_def_free(d);
 
         pa_xfree(devices);
     }
@@ -1199,17 +1207,10 @@ static void devices_add(struct userdata *u, struct pa_classify_device **p_device
     const char *method_name;
     char *ports_string = NULL; /* Just for log output. */
     pa_strbuf *buf; /* For building ports_string. */
+    bool replace = false;
 
     pa_assert(p_devices);
     pa_assert_se((devs = *p_devices));
-
-    newsize = sizeof(*devs) + sizeof(devs->defs[0]) * (devs->ndef + 1);
-
-    devs = *p_devices = pa_xrealloc(devs, newsize);
-
-    d = devs->defs + devs->ndef;
-
-    memset(d+1, 0, sizeof(devs->defs[0]));
 
     /* update variables */
     pa_policy_var_update(u, type);
@@ -1217,6 +1218,23 @@ static void devices_add(struct userdata *u, struct pa_classify_device **p_device
     pa_policy_var_update(u, arg);
     pa_policy_var_update(u, module);
     pa_policy_var_update(u, module_args);
+
+    for (d = devs->defs;  d->type;  d++) {
+        if (pa_streq(type, d->type)) {
+            replace = true;
+            break;
+        }
+    }
+
+    if (replace && d) {
+        device_def_free(d);
+        memset(d, 0, sizeof(*d));
+    } else {
+        newsize = sizeof(*devs) + sizeof(devs->defs[0]) * (devs->ndef + 1);
+        devs = *p_devices = pa_xrealloc(devs, newsize);
+        d = devs->defs + devs->ndef;
+        memset(d+1, 0, sizeof(devs->defs[0]));
+    }
 
     d->type  = pa_xstrdup(type);
     d->prop  = pa_xstrdup(prop);
@@ -1301,8 +1319,9 @@ static void devices_add(struct userdata *u, struct pa_classify_device **p_device
     ports_string = pa_strbuf_tostring_free(buf);
 #endif
 
-    pa_log_info("device '%s' added (%s|%s|%s|%s|0x%04x)",
-                type, d->prop, method_name, arg, ports_string, d->data.flags);
+    pa_log_info("device '%s' %s (%s|%s|%s|%s|0x%04x)",
+                type, replace ? "updated" : "added", d->prop,
+                method_name, arg, ports_string, d->data.flags);
 
     pa_xfree(ports_string);
 }
@@ -1357,25 +1376,31 @@ static int devices_is_typeof(struct pa_classify_device_def *defs,
     return false;
 }
 
+static void card_def_free(struct pa_classify_card_def *d)
+{
+    int i;
+
+    pa_assert(d);
+
+    pa_xfree(d->type);
+
+    for (i = 0; i < 2; i++) {
+        pa_xfree(d->data[i].profile);
+
+        if (d->data[i].method == pa_classify_method_matches)
+            regfree(&d->data[i].arg.rexp);
+        else
+            pa_xfree(d->data[i].arg.string);
+    }
+}
+
 static void cards_free(struct pa_classify_card *cards)
 {
     struct pa_classify_card_def *d;
-    int i;
 
     if (cards) {
-        for (d = cards->defs;  d->type;  d++) {
-
-            pa_xfree(d->type);
-
-            for (i = 0; i < 2; i++) {
-                pa_xfree(d->data[i].profile);
-
-                if (d->data[i].method == pa_classify_method_matches)
-                    regfree(&d->data[i].arg.rexp);
-                else
-                    pa_xfree(d->data[i].arg.string);
-            }
-        }
+        for (d = cards->defs;  d->type;  d++)
+            card_def_free(d);
 
         pa_xfree(cards);
     }
@@ -1392,6 +1417,7 @@ static void cards_add(struct userdata *u, struct pa_classify_card **p_cards,
     char *method_name[2];
     const char *arg_str;
     int i;
+    bool replace = false;
 
     pa_assert(p_cards);
     pa_assert_se((cards = *p_cards));
@@ -1399,13 +1425,22 @@ static void cards_add(struct userdata *u, struct pa_classify_card **p_cards,
     /* update variable */
     pa_policy_var_update(u, type);
 
-    newsize = sizeof(*cards) + sizeof(cards->defs[0]) * (cards->ndef + 1);
+    for (d = cards->defs;  d->type;  d++) {
+        if (pa_streq(type, d->type)) {
+            replace = true;
+            break;
+        }
+    }
 
-    cards = *p_cards = pa_xrealloc(cards, newsize);
-
-    d = cards->defs + cards->ndef;
-
-    memset(d+1, 0, sizeof(cards->defs[0]));
+    if (replace && d) {
+        card_def_free(d);
+        memset(d, 0, sizeof(*d));
+    } else {
+        newsize = sizeof(*cards) + sizeof(cards->defs[0]) * (cards->ndef + 1);
+        cards = *p_cards = pa_xrealloc(cards, newsize);
+        d = cards->defs + cards->ndef;
+        memset(d+1, 0, sizeof(cards->defs[0]));
+    }
 
     d->type    = pa_xstrdup(type);
 
@@ -1448,10 +1483,12 @@ static void cards_add(struct userdata *u, struct pa_classify_card **p_cards,
 
     cards->ndef++;
 
-    pa_log_info("card '%s' added (%s|%s|%s|0x%04x)", type, method_name[0], pa_policy_var(u, arg[0]),
+    pa_log_info("card '%s' %s (%s|%s|%s|0x%04x)", type, replace ? "updated" : "added",
+                method_name[0], pa_policy_var(u, arg[0]),
                 d->data[0].profile ? d->data[0].profile : "", d->data[0].flags);
     if (d->data[1].profile)
-        pa_log_info("  :: added (%s|%s|%s|0x%04x)", method_name[1], pa_policy_var(u, arg[1]),
+        pa_log_info("  :: %s (%s|%s|%s|0x%04x)", replace ? "updated" : "added",
+                    method_name[1], pa_policy_var(u, arg[1]),
                     d->data[1].profile ? d->data[1].profile : "", d->data[1].flags);
 }
 
