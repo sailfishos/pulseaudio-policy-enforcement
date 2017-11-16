@@ -103,9 +103,13 @@ struct ctxact {                          /* context rule actions */
 struct groupdef {
     char                    *name;
     char                    *sink;
-    enum pa_classify_method  method;
-    char                    *arg;
+    enum pa_classify_method  sink_method;
+    char                    *sink_prop;
+    char                    *sink_arg;
     char                    *source;
+    enum pa_classify_method  source_method;
+    char                    *source_prop;
+    char                    *source_arg;
     pa_proplist             *properties;
     char                    *flags;
     int                      flags_lineno;
@@ -205,8 +209,10 @@ static int contextdef_parse(int, char *, struct contextdef *);
 static int activitydef_parse(int, char *, struct activitydef *);
 static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_value);
 
-static int groupdev_parse(int lineno, enum device_class class, char *devdef, struct groupdef *grpdef);
-static int deviceprop_parse(int, enum device_class,char *,struct devicedef *);
+static int method_parse(int lineno, char *definition,
+                        enum pa_classify_method *method_val,
+                        char **method_prop,
+                        char **method_arg);
 static int ports_parse(int, const char *, struct devicedef *);
 static int module_parse(int, const char *, struct devicedef *);
 static int streamprop_parse(int, char *, struct streamdef *);
@@ -703,7 +709,11 @@ static void section_free(struct section *sec) {
         case section_group:
             pa_xfree(sec->def.group->name);
             pa_xfree(sec->def.group->sink);
+            pa_xfree(sec->def.group->sink_prop);
+            pa_xfree(sec->def.group->sink_arg);
             pa_xfree(sec->def.group->source);
+            pa_xfree(sec->def.group->source_prop);
+            pa_xfree(sec->def.group->source_arg);
             pa_xfree(sec->def.group->flags);
             pa_xfree(sec->def.group);
             break;
@@ -853,10 +863,12 @@ static int section_close(struct userdata *u, struct section *sec)
             flags_parse(u, grdef->flags_lineno, grdef->flags, section_group, &flags);
 
             /* Transfer ownership of grdef->properties */
-            pa_policy_group_new(u, grdef->name,   grdef->sink, grdef->method, grdef->arg,
-                                   grdef->source, grdef->properties,
+            pa_policy_group_new(u, grdef->name,   grdef->sink,
+                                   grdef->sink_method, grdef->sink_arg, grdef->sink_prop,
+                                   grdef->source,
+                                   grdef->source_method, grdef->source_arg, grdef->source_prop,
+                                   grdef->properties,
                                    flags);
-
             break;
 
         case section_device:
@@ -1112,13 +1124,22 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
                 grdef->name = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "sink=", 5)) {
-            if (!strncmp(line+5, "name@", 5))
-                sts = groupdev_parse(lineno, device_sink, line+10, grdef);
+            if (strchr(line, ':'))
+                sts = method_parse(lineno, line+5,
+                                   &grdef->sink_method,
+                                   &grdef->sink_prop,
+                                   &grdef->sink_arg);
             else
                 grdef->sink = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "source=", 7)) {
-            grdef->source = pa_xstrdup(line+7);
+            if (strchr(line, ':'))
+                sts = method_parse(lineno, line+7,
+                                   &grdef->source_method,
+                                   &grdef->source_prop,
+                                   &grdef->source_arg);
+            else
+                grdef->source = pa_xstrdup(line+7);
         }
         else if (!strncmp(line, "properties=", 11)) {
             grdef->properties = pa_proplist_from_string(line + 11);
@@ -1159,10 +1180,18 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
             devdef->type = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "sink=", 5)) {
-            sts = deviceprop_parse(lineno, device_sink, line+5, devdef);
+            devdef->class = device_sink;
+            sts = method_parse(lineno, line+5,
+                               &devdef->method,
+                               &devdef->prop,
+                               &devdef->arg);
         }
         else if (!strncmp(line, "source=", 7)) {
-            sts = deviceprop_parse(lineno, device_source, line+7, devdef);
+            devdef->class = device_source;
+            sts = method_parse(lineno, line+7,
+                               &devdef->method,
+                               &devdef->prop,
+                               &devdef->arg);
         }
         else if (!strncmp(line, "ports=", 6)) {
             sts = ports_parse(lineno, line+6, devdef);
@@ -1441,81 +1470,56 @@ static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_
     return sts;
 }
 
-static int deviceprop_parse(int lineno, enum device_class class,
-                            char *propdef, struct devicedef *devdef)
+static int method_parse(int lineno, char *definition,
+                        enum pa_classify_method *method_val,
+                        char **method_prop,
+                        char **method_arg)
 {
     char *colon;
     char *at;
-    char *prop;
-    char *method;
-    char *arg;
+    const char *prop;
+    const char *method;
+    const char *arg;
 
-    if ((colon = strchr(propdef, ':')) == NULL) {
-        pa_log("invalid definition '%s' in line %d", propdef, lineno);
+    pa_assert(definition);
+    pa_assert(method_val);
+    pa_assert(method_prop);
+    pa_assert(method_arg);
+
+    if ((colon = strchr(definition, ':')) == NULL) {
+        pa_log("invalid definition '%s' in line %d", definition, lineno);
         return -1;
     }
 
     *colon = '\0';
     arg    = colon + 1;
 
-    if ((at = strchr(propdef, '@')) == NULL) {
-        prop   = "name";
-        method = propdef;
+    if ((at = strchr(definition, '@')) == NULL) {
+        prop   = "(name)";
+        method = definition;
     }
     else {
         *at    = '\0';
-        prop   = propdef;
+        prop   = definition;
         method = at + 1;
     }
-    
+
     if (!strcmp(method, "equals"))
-        devdef->method = pa_method_equals;
+        *method_val = pa_method_equals;
     else if (!strcmp(method, "startswith"))
-        devdef->method = pa_method_startswith;
+        *method_val = pa_method_startswith;
     else if (!strcmp(method, "matches"))
-        devdef->method = pa_method_matches;
-    else {
-        pa_log("invalid method '%s' in line %d", method, lineno);
-        return -1;
-    }
-    
-    devdef->class = class;
-    devdef->prop  = pa_xstrdup(prop);
-    devdef->arg   = pa_xstrdup(arg);
-    
-    return 0;
-}
-
-static int groupdev_parse(int lineno, enum device_class class,
-                          char *devdef, struct groupdef *grpdef)
-{
-    char *colon;
-    char *method;
-    char *arg;
-
-    if ((colon = strchr(devdef, ':')) == NULL) {
-        pa_log("invalid definition '%s' in line %d", devdef, lineno);
-        return -1;
-    }
-
-    *colon = '\0';
-    method = devdef;
-    arg    = colon + 1;
-
-    if (!strcmp(method, "equals"))
-        grpdef->method = pa_method_equals;
-    else if (!strcmp(method, "startswith"))
-        grpdef->method = pa_method_startswith;
+        *method_val = pa_method_matches;
     else {
         pa_log("invalid method '%s' in line %d", method, lineno);
         return -1;
     }
 
-    grpdef->arg    = pa_xstrdup(arg);
+    *method_prop = pa_xstrdup(prop);
+    *method_arg  = pa_xstrdup(arg);
 
     return 0;
 }
-
 
 static int ports_parse(int lineno, const char *portsdef,
                        struct devicedef *devdef)
