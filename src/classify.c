@@ -65,7 +65,7 @@ static void devices_free(struct pa_classify_device *);
 static void devices_add(struct userdata *u, struct pa_classify_device **p_devices, const char *type,
                         enum pa_policy_object_type obj_type, const char *prop,
                         enum pa_classify_method method, const char *arg,
-                        pa_hashmap *ports, const char *module, const char *module_args,
+                        pa_idxset *ports, const char *module, const char *module_args,
                         uint32_t flags, uint32_t port_change_delay);
 static int devices_classify(struct pa_classify_device *devices, const void *object,
                             uint32_t flag_mask, uint32_t flag_value,
@@ -83,7 +83,9 @@ static int  cards_classify(struct pa_classify_card *, pa_card *, pa_hashmap *car
 static int card_is_typeof(struct pa_classify_card_def *, pa_card *card,
                           const char *, struct pa_classify_card_data **, int *priority);
 
-static int port_device_is_typeof(struct pa_classify_device_def *, const char *,
+static int port_device_is_typeof(struct pa_classify_device_def *,
+                                 enum pa_policy_object_type obj_type,
+                                 void *obj,
                                  const char *,
                                  struct pa_classify_device_data **);
 
@@ -154,7 +156,7 @@ void pa_classify_free(struct userdata *u)
 
 void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop,
                           enum pa_classify_method method, const char *arg,
-                          pa_hashmap *ports,
+                          pa_idxset *ports,
                           const char *module, const char *module_args,
                           uint32_t flags, uint32_t port_change_delay)
 {
@@ -173,7 +175,7 @@ void pa_classify_add_sink(struct userdata *u, const char *type, const char *prop
 
 void pa_classify_add_source(struct userdata *u, const char *type, const char *prop,
                             enum pa_classify_method method, const char *arg,
-                            pa_hashmap *ports,
+                            pa_idxset *ports,
                             const char *module, const char *module_args,
                             uint32_t flags)
 {
@@ -467,7 +469,6 @@ int pa_classify_is_port_sink_typeof(struct userdata *u, struct pa_sink *sink,
 {
     struct pa_classify *classify;
     struct pa_classify_device_def *defs;
-    const char *name;
 
     pa_assert(u);
     pa_assert_se((classify = u->classify));
@@ -477,9 +478,7 @@ int pa_classify_is_port_sink_typeof(struct userdata *u, struct pa_sink *sink,
     if (!sink || !type)
         return false;
 
-    name = pa_sink_ext_get_name(sink);
-
-    return port_device_is_typeof(defs, name, type, d);
+    return port_device_is_typeof(defs, pa_policy_object_sink, sink, type, d);
 }
 
 
@@ -490,7 +489,6 @@ int pa_classify_is_port_source_typeof(struct userdata *u,
 {
     struct pa_classify *classify;
     struct pa_classify_device_def *defs;
-    const char *name;
 
     pa_assert(u);
     pa_assert_se((classify = u->classify));
@@ -500,9 +498,7 @@ int pa_classify_is_port_source_typeof(struct userdata *u,
     if (!source || !type)
         return false;
 
-    name = pa_source_ext_get_name(source);
-
-    return port_device_is_typeof(defs, name, type, d);
+    return port_device_is_typeof(defs, pa_policy_object_source, source, type, d);
 }
 
 
@@ -1062,10 +1058,12 @@ streams_find(struct userdata *u, struct pa_classify_stream_def **defs, pa_propli
 #undef ID_MATCH_OF
 }
 
-void pa_classify_port_entry_free(struct pa_classify_port_entry *port) {
+static void classify_port_entry_free(void *data) {
+    struct pa_classify_port_entry *port = data;
+
     pa_assert(port);
 
-    pa_xfree(port->device_name);
+    pa_policy_match_free(port->device_match);
     pa_xfree(port->port_name);
     pa_xfree(port);
 }
@@ -1077,7 +1075,7 @@ static void device_def_free(struct pa_classify_device_def *d)
     pa_xfree(d->type);
 
     if (d->data.ports)
-        pa_hashmap_free(d->data.ports);
+        pa_idxset_free(d->data.ports, classify_port_entry_free);
 
     pa_policy_match_free(d->dev_match);
 
@@ -1100,7 +1098,7 @@ static void devices_free(struct pa_classify_device *devices)
 static void devices_add(struct userdata *u, struct pa_classify_device **p_devices, const char *type,
                         enum pa_policy_object_type obj_type, const char *prop,
                         enum pa_classify_method method, const char *arg,
-                        pa_hashmap *ports, const char *module, const char *module_args,
+                        pa_idxset *ports, const char *module, const char *module_args,
                         uint32_t flags, uint32_t port_change_delay)
 {
     struct pa_classify_device *devs;
@@ -1153,32 +1151,37 @@ static void devices_add(struct userdata *u, struct pa_classify_device **p_device
 
     buf = pa_strbuf_new();
 
-    if (ports && !pa_hashmap_isempty(ports)) {
+    if (ports && !pa_idxset_isempty(ports)) {
+        struct pa_classify_port_config_entry *port_config;
         struct pa_classify_port_entry *port;
-        void *state;
+        char *port_entry_tmp;
+        uint32_t idx;
         bool first = true;
 
-        /* Copy the ports hashmap to d->data.ports. */
+        /* Copy the ports idxset to d->data.ports. */
 
-        d->data.ports = pa_hashmap_new_full(pa_idxset_string_hash_func,
-                                            pa_idxset_string_compare_func,
-                                            NULL,
-                                            (pa_free_cb_t) pa_classify_port_entry_free);
-        PA_HASHMAP_FOREACH(port, ports, state) {
-            struct pa_classify_port_entry *port_copy =
-                pa_xnew(struct pa_classify_port_entry, 1);
+        d->data.ports = pa_idxset_new(NULL, NULL);
 
-            port_copy->device_name = pa_xstrdup(pa_policy_var(u, port->device_name));
-            port_copy->port_name = pa_xstrdup(pa_policy_var(u, port->port_name));
+        PA_IDXSET_FOREACH(port_config, ports, idx) {
+            port = pa_xnew0(struct pa_classify_port_entry, 1);
 
-            pa_hashmap_put(d->data.ports, port_copy->device_name, port_copy);
+            port->port_name = pa_xstrdup(pa_policy_var(u, port_config->port_name));
+            port->device_match = pa_policy_match_new(obj_type,
+                                                     pa_streq(port_config->prop, "(name)") ?
+                                                        pa_object_name : pa_object_property,
+                                                     pa_policy_var(u, port_config->prop),
+                                                     port_config->method,
+                                                     pa_policy_var(u, port_config->arg));
 
-            if (!first) {
+            pa_idxset_put(d->data.ports, port, NULL);
+
+            if (!first)
                 pa_strbuf_putc(buf, ',');
-            }
             first = false;
 
-            pa_strbuf_printf(buf, "%s:%s", port_copy->device_name, port_copy->port_name);
+            port_entry_tmp = pa_policy_match_def(port->device_match);
+            pa_strbuf_printf(buf, "%s:%s", port_entry_tmp, port->port_name);
+            pa_xfree(port_entry_tmp);
         }
     }
 
@@ -1421,15 +1424,17 @@ static int card_is_typeof(struct pa_classify_card_def *defs, pa_card *card,
 }
 
 static int port_device_is_typeof(struct pa_classify_device_def *defs,
-                                 const char *name, const char *type,
+                                 enum pa_policy_object_type obj_type,
+                                 void *obj,
+                                 const char *type,
                                  struct pa_classify_device_data **data)
 {
     struct pa_classify_device_def *d;
 
     for (d = defs;  d->type;  d++) {
         if (pa_streq(type, d->type)) {
-            if (d->data.ports && pa_hashmap_get(d->data.ports, name)) {
-                if (data != NULL)
+            if (d->data.ports && pa_classify_get_port_entry(&d->data, obj_type, obj)) {
+                if (data)
                     *data = &d->data;
 
                 return true;
@@ -1440,6 +1445,24 @@ static int port_device_is_typeof(struct pa_classify_device_def *defs,
     return false;
 }
 
+struct pa_classify_port_entry *pa_classify_get_port_entry(struct pa_classify_device_data *data,
+                                                          enum pa_policy_object_type obj_type,
+                                                          void *obj)
+{
+    struct pa_classify_port_entry *port;
+    uint32_t idx;
+
+    pa_assert(data);
+    pa_assert(obj);
+    pa_assert(obj_type == pa_policy_object_sink || obj_type == pa_policy_object_source);
+
+    PA_IDXSET_FOREACH(port, data->ports, idx) {
+        if (pa_policy_match_type(port->device_match, obj_type, obj))
+            return port;
+    }
+
+    return NULL;
+}
 
 /*
  * Local Variables:
