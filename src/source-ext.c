@@ -236,6 +236,8 @@ static void handle_new_source(struct userdata *u, struct pa_source *source)
         pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0, &r);
         pa_policy_send_device_state(u, PA_POLICY_CONNECTED, r);
         pa_xfree(r);
+
+        pa_policy_groupset_update_sources(u);
     }
 }
 
