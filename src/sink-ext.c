@@ -300,7 +300,9 @@ int pa_sink_ext_set_ports(struct userdata *u, const char *type)
         /* Check whether the port of this sink should be changed. */
         if (pa_classify_is_port_sink_typeof(u, sink, type, &data)) {
 
-            pa_assert_se(port_entry = pa_hashmap_get(data->ports, sink->name));
+            pa_assert_se(port_entry = pa_classify_get_port_entry(data,
+                                                                 pa_policy_object_sink,
+                                                                 sink));
             pa_assert_se(port = port_entry->port_name);
 
             ext  = pa_sink_ext_lookup(u, sink);
