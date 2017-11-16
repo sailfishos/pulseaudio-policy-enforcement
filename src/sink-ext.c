@@ -108,7 +108,7 @@ struct pa_sink_evsubscr *pa_sink_ext_subscription(struct userdata *u)
     
     put    = pa_hook_connect(hooks + PA_CORE_HOOK_SINK_PUT,
                              PA_HOOK_LATE, sink_put, (void *)u);
-    unlink = pa_hook_connect(hooks + PA_CORE_HOOK_SINK_UNLINK,
+    unlink = pa_hook_connect(hooks + PA_CORE_HOOK_SINK_UNLINK_POST,
                              PA_HOOK_LATE, sink_unlink, (void *)u);
     
 
@@ -589,6 +589,8 @@ static void handle_removed_sink(struct userdata *u, struct pa_sink *sink)
         pa_classify_sink(u, sink, PA_POLICY_DISABLE_NOTIFY, 0, &r);
         pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, r);
         pa_xfree(r);
+
+        pa_policy_groupset_update_sinks(u);
     }
 }
 
