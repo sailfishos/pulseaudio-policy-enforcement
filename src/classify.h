@@ -2,8 +2,8 @@
 #define fooclassifyfoo
 
 #include <sys/types.h>
-#include <regex.h>
 
+#include "match.h"
 #include "userdata.h"
 
 #define PA_POLICY_PID_HASH_BITS  6
@@ -39,44 +39,18 @@ struct pa_sink_input;
 struct pa_sink_input_new_data;
 struct pa_card;
 
-enum pa_classify_method {
-    pa_method_unknown = 0,
-    pa_method_min = pa_method_unknown,
-    pa_method_equals,
-    pa_method_startswith,
-    pa_method_matches,
-    pa_method_true,
-    pa_method_max
-};
-
-union pa_classify_arg {
-    char       *string;
-    regex_t     rexp;
-};
-
 struct pa_classify_pid_hash {
     struct pa_classify_pid_hash *next;
     pid_t                        pid;   /* process id (or parent process id) */
                                         /* for stream classification */
-    char                        *prop;  /*     stream property, if any  */
-    struct {
-        enum pa_classify_method type;
-        int                   (*func)(const char *,union pa_classify_arg *);
-    }                            method;
-    struct {
-        char                 *def;
-        union pa_classify_arg value;
-    }                            arg;   /*     argument */
+    pa_policy_match_object      *pid_match;
     char                        *group; /* policy group name */
 };
 
 struct pa_classify_stream_def {
     struct pa_classify_stream_def *next;
                                           /* for stream classification */
-    char                          *prop;  /*   stream property */
-    int                          (*method)(const char *,
-                                           union pa_classify_arg *);
-    union pa_classify_arg          arg;   /*   argument */
+    pa_policy_match_object        *stream_match;
     uid_t                          uid;   /* user id, if any */
     char                          *exe;   /* exe name, if any */
     char                          *clnam; /* client name, if any */
@@ -112,10 +86,7 @@ struct pa_classify_device_data {
 struct pa_classify_device_def {
     char                            *type;  /* device type, e.g. ihf */
                                             /* for classification */
-    char                            *prop;  /*   sink/source property */
-    int                            (*method)(const char *,
-                                             union pa_classify_arg *);
-    union pa_classify_arg            arg;   /*   argument */
+    pa_policy_match_object          *dev_match;
     struct pa_classify_device_data   data;  /* data associated with device */
 };
 
@@ -127,8 +98,7 @@ struct pa_classify_device {
 struct pa_classify_card_data {
     char                        *profile; /* name of profile */
     uint32_t                     flags;   /* PA_POLICY_DISABLE_NOTIFY, etc */
-    int                        (*method)(const char *,union pa_classify_arg *);
-    union pa_classify_arg        arg;
+    pa_policy_match_object      *card_match;
 };
 
 struct pa_classify_card_def {
@@ -224,12 +194,6 @@ int pa_classify_is_port_source_typeof(struct userdata *, struct pa_source *,
 
 int pa_classify_update_module(struct userdata *u, uint32_t dir, struct pa_classify_device_data *device);
 void pa_classify_update_modules(struct userdata *u, uint32_t dir, const char *type);
-
-const char *pa_classify_method_str(enum pa_classify_method method);
-int   pa_classify_method_equals(const char *, union pa_classify_arg *);
-int   pa_classify_method_startswith(const char *, union pa_classify_arg *);
-int   pa_classify_method_matches(const char *, union pa_classify_arg *);
-int   pa_classify_method_true(const char *, union pa_classify_arg *);
 
 #endif
 
