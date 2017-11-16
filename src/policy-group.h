@@ -5,7 +5,7 @@
 #include <pulsecore/sink.h>
 
 #include "userdata.h"
-#include "classify.h"
+#include "match.h"
 
 #define PA_POLICY_GROUP_HASH_BITS 6
 #define PA_POLICY_GROUP_HASH_DIM  (1 << PA_POLICY_GROUP_HASH_BITS)
@@ -48,14 +48,11 @@ struct pa_policy_group {
     char                         *portname; /* name of the default port */
     struct pa_sink               *sink;     /* default sink for the group */
     uint32_t                      sinkidx;  /* index of the default sink */
-    struct {
-        enum pa_classify_method type;
-        int                   (*func)(const char *,union pa_classify_arg *);
-    }                            method;
-    union pa_classify_arg        arg;       /* argument */
+    pa_policy_match_object       *sink_match;
     char                         *srcname;  /* name of the default source */
     struct pa_source             *source;   /* default source fror the group */
     uint32_t                      srcidx;   /* index of the default source */
+    pa_policy_match_object       *src_match;
     pa_volume_t                   limit;    /* volume limit for the group */
     int                           locmute;  /* mute by local policy */
     int                           corked;
@@ -86,14 +83,23 @@ void pa_policy_groupset_free(struct pa_policy_groupset *);
 void pa_policy_groupset_update_default_sink(struct userdata *, uint32_t);
 void pa_policy_groupset_register_sink(struct userdata *, struct pa_sink *);
 void pa_policy_groupset_unregister_sink(struct userdata *, uint32_t);
+void pa_policy_groupset_update_sinks(struct userdata *u);
 void pa_policy_groupset_register_source(struct userdata *, struct pa_source *);
 void pa_policy_groupset_unregister_source(struct userdata *, uint32_t);
+void pa_policy_groupset_update_sources(struct userdata *u);
 void pa_policy_groupset_create_default_group(struct userdata *, const char *);
 int pa_policy_groupset_restore_volume(struct userdata *, struct pa_sink *);
 
 struct pa_policy_group *pa_policy_group_new(struct userdata *, const char*,
-                                            const char *sink, enum pa_classify_method method, const char *arg,
-                                            const char *source, pa_proplist*, uint32_t);
+                                            const char *sink,
+                                            enum pa_classify_method sink_method,
+                                            const char *sink_arg,
+                                            const char *sink_prop,
+                                            const char *source,
+                                            enum pa_classify_method source_method,
+                                            const char *source_arg,
+                                            const char *source_prop,
+                                            pa_proplist*, uint32_t);
 void pa_policy_group_free(struct pa_policy_groupset *, const char *);
 struct pa_policy_group *pa_policy_group_find(struct userdata *, const char *);
 
@@ -117,6 +123,8 @@ int  pa_policy_group_cork(struct userdata *u, const char *, int);
 int  pa_policy_group_volume_limit(struct userdata *, const char *, uint32_t);
 
 pa_sink *pa_policy_group_find_sink(struct userdata *u, struct pa_policy_group *group);
+bool pa_policy_group_sink(struct pa_policy_group *group, pa_sink *sink);
+bool pa_policy_group_source(struct pa_policy_group *group, pa_source *source);
 
 #endif
 
