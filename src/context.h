@@ -2,6 +2,7 @@
 #define foopolicycontextfoo
 
 #include "classify.h"
+#include "match.h"
 
 #define PA_POLICY_CONTEXT_MAX_CHANGES (16)
 
@@ -17,20 +18,6 @@ enum pa_policy_action_type {
     pa_policy_action_max
 };
 
-enum pa_policy_object_type {
-    pa_policy_object_unknown = 0,
-    pa_policy_object_min = pa_policy_object_unknown,
-
-    pa_policy_object_module,
-    pa_policy_object_card,
-    pa_policy_object_sink,
-    pa_policy_object_source,
-    pa_policy_object_sink_input,
-    pa_policy_object_source_output,
-
-    pa_policy_object_max
-};
-
 enum pa_policy_value_type {
     pa_policy_value_unknown = 0,
     pa_policy_value_min = pa_policy_value_unknown,
@@ -41,15 +28,9 @@ enum pa_policy_value_type {
     pa_policy_value_max
 };
 
-struct pa_policy_match {
-    int                               (*method)(const char *,
-                                                union pa_classify_arg *);
-    union pa_classify_arg               arg;
-};
-
 struct pa_policy_object {
     enum pa_policy_object_type          type;
-    struct pa_policy_match              match;
+    pa_policy_match_object             *match;
     void                               *ptr;
     unsigned long                       index;
 };
@@ -118,7 +99,7 @@ union pa_policy_context_action {
 
 struct pa_policy_context_rule {
     struct pa_policy_context_rule      *next;
-    struct pa_policy_match              match; /* for the variable value */
+    pa_policy_match_object             *match;
     union pa_policy_context_action     *actions;
 };
 
@@ -131,7 +112,7 @@ struct pa_policy_context_variable {
 
 struct pa_policy_activity_rule {
     struct pa_policy_activity_rule     *next;
-    struct pa_policy_match              match; /* for the variable value */
+    pa_policy_match_object             *match;
     union pa_policy_context_action     *actions;
 };
 

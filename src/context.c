@@ -12,6 +12,7 @@
 #include "sink-input-ext.h"
 #include "source-output-ext.h"
 #include "variable.h"
+#include "match.h"
 
 static struct pa_policy_context_variable
             *add_variable(struct pa_policy_context *, const char *);
@@ -30,10 +31,6 @@ static void  delete_action(union pa_policy_context_action **,
                            union pa_policy_context_action *);
 static int perform_action(struct userdata *, union pa_policy_context_action *,
                           char *);
-
-static int   match_setup(struct pa_policy_match *, enum pa_classify_method,
-                         const char *, enum pa_classify_method *);
-static void  match_cleanup(struct pa_policy_match *);
 
 static int   value_setup(struct userdata *u, union pa_policy_value *,
                          enum pa_policy_value_type, va_list);
@@ -55,7 +52,6 @@ static const char *object_name(struct pa_policy_object *);
 static void fire_object_property_changed_hook(struct pa_policy_object *object);
 
 static unsigned long object_index(enum pa_policy_object_type, void *);
-static const char *object_type_str(enum pa_policy_object_type);
 
 /* activities */
 static struct pa_policy_activity_variable
@@ -243,7 +239,9 @@ pa_policy_context_add_property_action(struct userdata *u,
     setprop->lineno = lineno;
 
     setprop->object.type = obj_type;
-    match_setup(&setprop->object.match, obj_classify, obj_name, NULL);
+    setprop->object.match = pa_policy_match_name_new(obj_type,
+                                                     obj_classify,
+                                                     obj_name);
 
     setprop->property = pa_xstrdup(prop_name);
 
@@ -277,7 +275,7 @@ pa_policy_context_delete_property_action(struct userdata *u,
     delprop->lineno = lineno;
 
     delprop->object.type = obj_type;
-    match_setup(&delprop->object.match, obj_classify, obj_name, NULL);
+    delprop->object.match = pa_policy_match_string_new(obj_classify, obj_name);
 
     delprop->property = pa_xstrdup(prop_name);
 
@@ -335,7 +333,7 @@ pa_policy_context_override_action(struct userdata               *u,
     overr->lineno = lineno;
 
     overr->object.type = obj_type;
-    match_setup(&overr->object.match, obj_classify, obj_name, NULL);
+    overr->object.match = pa_policy_match_string_new(obj_classify, obj_name);
 
     overr->profile = pa_xstrdup(profile_name);
 
@@ -345,8 +343,10 @@ pa_policy_context_override_action(struct userdata               *u,
 
     /* Store the value for the rule but set the method as true so
      * that the value is always handled. */
-    rule->match.method = pa_classify_method_true;
-    overr->active_val = pa_xstrdup(rule->match.arg.string);
+    overr->active_val = pa_xstrdup(pa_policy_match_arg(rule->match));
+    if (rule->match)
+        pa_policy_match_free(rule->match);
+    rule->match = pa_policy_match_string_new(pa_method_true, "");
 
     append_action(&rule->actions, action);
     append_action(&u->context->overrides, action);
@@ -409,7 +409,7 @@ int pa_policy_context_variable_changed(struct userdata *u, const char *name,
                 var->value = pa_xstrdup(value);
 
                 for (rule = var->rules;  rule != NULL;  rule = rule->next) {
-                    if (rule->match.method(value, &rule->match.arg)) {
+                    if (pa_policy_match(rule->match, value)) {
                         for (actn = rule->actions; actn; actn = actn->any.next)
                         {
                             if (u->context->variable_change_count == PA_POLICY_CONTEXT_MAX_CHANGES) {
@@ -549,14 +549,12 @@ add_rule(struct pa_policy_context_rule    **rules,
 {
     struct pa_policy_context_rule *rule = pa_xmalloc0(sizeof(*rule));
     struct pa_policy_context_rule *last;
-    enum pa_classify_method        method_status;
 
-    if (!match_setup(&rule->match, method, arg, &method_status)) {
+    if (!(rule->match = pa_policy_match_string_new(method, arg))) {
         pa_log("%s: invalid rule definition (method %s)",
-               __FUNCTION__, pa_classify_method_str(method_status));
-        pa_xfree(rule);
+               __FUNCTION__, pa_match_method_str(method));
         return NULL;
-    };
+    }
 
     for (last = (struct pa_policy_context_rule *)rules;
          last->next != NULL;
@@ -580,7 +578,7 @@ static void delete_rule(struct pa_policy_context_rule **rules,
         if (last->next == rule) {
             last->next = rule->next;
 
-            match_cleanup(&rule->match);
+            pa_policy_match_free(rule->match);
 
             while (rule->actions != NULL)
                 delete_action(&rule->actions, rule->actions);
@@ -628,7 +626,7 @@ static void delete_action(union pa_policy_context_action **actions,
             case pa_policy_set_property:
                 setprop = &action->setprop;
 
-                match_cleanup(&setprop->object.match);
+                pa_policy_match_free(setprop->object.match);
                 pa_xfree(setprop->property);
                 value_cleanup(&setprop->value);
 
@@ -640,7 +638,7 @@ static void delete_action(union pa_policy_context_action **actions,
 
             case pa_policy_override:
                 overr = &action->overr;
-                match_cleanup(&overr->object.match);
+                pa_policy_match_free(overr->object.match);
                 pa_xfree(overr->profile);
                 pa_xfree(overr->orig_profile);
                 pa_xfree(overr->active_val);
@@ -780,7 +778,7 @@ static int perform_action(struct userdata                *u,
 
                 old_value = get_object_property(object, setprop->property);
                 objname   = object_name(object);
-                objtype   = object_type_str(object->type);
+                objtype   = pa_policy_object_type_str(object->type);
                 
                 if (!strcmp(prop_value, old_value)) {
                     pa_log_debug("%s '%s' property '%s' value is already '%s'",
@@ -811,7 +809,7 @@ static int perform_action(struct userdata                *u,
             success = true;
 
             objname = object_name(object);
-            objtype = object_type_str(object->type);
+            objtype = pa_policy_object_type_str(object->type);
             
             pa_log_debug("deleting %s '%s' property '%s'",
                          objtype, objname, delprop->property);
@@ -836,62 +834,6 @@ static int perform_action(struct userdata                *u,
     }
 
     return success;
-}
-
-static int match_setup(struct pa_policy_match  *match,
-                       enum pa_classify_method  method,
-                       const char              *arg,
-                       enum pa_classify_method *method_name_ret)
-{
-    enum pa_classify_method method_name = method;
-    int   success = true;
-
-    switch (method) {
-
-    case pa_method_equals:
-        match->method = pa_classify_method_equals;
-        match->arg.string = pa_xstrdup(arg);
-        break;
-
-    case pa_method_startswith:
-        match->method = pa_classify_method_startswith;
-        match->arg.string = pa_xstrdup(arg);
-        break;
-
-    case pa_method_true:
-        match->method = pa_classify_method_true;
-        memset(&match->arg, 0, sizeof(match->arg));
-        break;
-
-    case pa_method_matches:
-        if (regcomp(&match->arg.rexp, arg, 0) == 0) {
-            match->method = pa_classify_method_matches;
-            break;
-        }
-        /* intentional fall trough */
-
-    default:
-        memset(match, 0, sizeof(*match));
-        method_name = pa_method_unknown;
-        success = false;
-        break;
-    };
-
-    if (method_name_ret != NULL)
-        *method_name_ret = method_name;
-
-    return success;
-}
-
-
-static void match_cleanup(struct pa_policy_match *match)
-{
-    if (match->method == pa_classify_method_matches)
-        regfree(&match->arg.rexp);
-    else
-        pa_xfree((void *)match->arg.string);
-
-    memset(match, 0, sizeof(*match));
 }
 
 static int value_setup(struct userdata           *u,
@@ -955,9 +897,9 @@ static void register_object(struct pa_policy_object *object,
 {
     const char    *type_str;
 
-    if (object->type == type && object->match.method(name,&object->match.arg)){
+    if (pa_policy_match_type(object->match, type, ptr)) {
 
-        type_str = object_type_str(type);
+        type_str = pa_policy_object_type_str(type);
 
         if (object->ptr != NULL) {
             pa_log("multiple match for %s '%s' (line %d in config file)",
@@ -981,12 +923,10 @@ static void unregister_object(struct pa_policy_object *object,
                               unsigned long index,
                               int lineno)
 {
-    if (( ptr &&                ptr == object->ptr             ) ||
-        (!ptr && type == object->type && index == object->index)   ) {
-
+    if (ptr == object->ptr && index == object->index) {
         pa_log_debug("unregistering context-rule for %s '%s' "
                      "(line %d in config file)",
-                     object_type_str(object->type), name, lineno);
+                     pa_policy_object_type_str(type), name, lineno);
 
         object->ptr   = NULL;
         object->index = PA_IDXSET_INVALID;
@@ -1225,19 +1165,6 @@ static unsigned long object_index(enum pa_policy_object_type type, void *ptr)
 }
 
 
-static const char *object_type_str(enum pa_policy_object_type type)
-{
-    switch (type) {
-    case pa_policy_object_module:         return "module";
-    case pa_policy_object_card:           return "card";
-    case pa_policy_object_sink:           return "sink";
-    case pa_policy_object_source:         return "source";
-    case pa_policy_object_sink_input:     return "sink-input";
-    case pa_policy_object_source_output:  return "source-output";
-    default:                              return "<unknown>";
-    }
-}
-
 static
 struct pa_policy_activity_variable *get_activity_variable(struct userdata *u, struct pa_policy_context *ctx,
                                                           const char *device)
@@ -1324,7 +1251,7 @@ static int perform_activity_action(pa_sink *sink, struct pa_policy_activity_vari
     }
 
     for ( ;  rule != NULL;  rule = rule->next) {
-        if (rule->match.method(sink->name, &rule->match.arg)) {
+        if (pa_policy_match(rule->match, sink->name)) {
 
             if (force_state == -1 && var->sink_opened != -1 && var->sink_opened == is_opened) {
                 pa_log_debug("Already executed actions for state change, skip.");
