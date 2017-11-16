@@ -3,6 +3,7 @@ modlibexec_LTLIBRARIES = module-policy-enforcement.la
 module_policy_enforcement_la_SOURCES = \
 			module-policy-enforcement.c \
 			log.c \
+			match.c \
 			variable.c \
 			index-hash.c \
 			config-file.c \
