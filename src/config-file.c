@@ -40,6 +40,9 @@
 
 #define DEFAULT_PORT_CHANGE_DELAY_MS (200)
 
+#define DEV_PORT_SEPARATOR         "->"
+#define DEV_PORT_SEPARATOR_LEN     (2)
+
 enum section_type {
     section_unknown = 0,
     section_group,
@@ -121,8 +124,7 @@ struct devicedef {
     char                    *prop;
     enum pa_classify_method  method;
     char                    *arg;
-    pa_hashmap              *ports; /* Key: device name, value:
-                                     * pa_classify_port_entry. */
+    pa_idxset               *ports;
     char                    *module;
     char                    *module_args;
     char                    *delay;
@@ -213,7 +215,9 @@ static int method_parse(int lineno, char *definition,
                         enum pa_classify_method *method_val,
                         char **method_prop,
                         char **method_arg);
-static int ports_parse(int, const char *, struct devicedef *);
+static int ports_parse_old(int, const char *, struct devicedef *);
+static int ports_parse_new(int, const char *, struct devicedef *);
+static void port_config_entry_free(void *data);
 static int module_parse(int, const char *, struct devicedef *);
 static int streamprop_parse(int, char *, struct streamdef *);
 static int contextval_parse(int, char *, enum pa_classify_method *method, char **arg);
@@ -720,7 +724,7 @@ static void section_free(struct section *sec) {
 
         case section_device:
             if (sec->def.device->ports)
-                pa_hashmap_free(sec->def.device->ports);
+                pa_idxset_free(sec->def.device->ports, port_config_entry_free);
             pa_xfree(sec->def.device->type);
             pa_xfree(sec->def.device->prop);
             pa_xfree(sec->def.device->arg);
@@ -1194,7 +1198,10 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
                                &devdef->arg);
         }
         else if (!strncmp(line, "ports=", 6)) {
-            sts = ports_parse(lineno, line+6, devdef);
+            if (strstr(line, DEV_PORT_SEPARATOR))
+                sts = ports_parse_new(lineno, line+6, devdef);
+            else
+                sts = ports_parse_old(lineno, line+6, devdef);
         }
         else if (!strncmp(line, "module=", 7)) {
             sts = module_parse(lineno, line+7, devdef);
@@ -1521,8 +1528,17 @@ static int method_parse(int lineno, char *definition,
     return 0;
 }
 
-static int ports_parse(int lineno, const char *portsdef,
-                       struct devicedef *devdef)
+static void port_config_entry_free(void *data)
+{
+    struct pa_classify_port_config_entry *port = data;
+    pa_xfree(port->prop);
+    pa_xfree(port->arg);
+    pa_xfree(port->port_name);
+    pa_xfree(port);
+}
+
+static int ports_parse_old(int lineno, const char *portsdef,
+                           struct devicedef *devdef)
 {
     char **entries;
 
@@ -1530,20 +1546,17 @@ static int ports_parse(int lineno, const char *portsdef,
         pa_log("Duplicate ports= line in line %d, using the last "
                "occurrence.", lineno);
 
-        pa_hashmap_free(devdef->ports);
+        pa_idxset_free(devdef->ports, port_config_entry_free);
     }
 
-    devdef->ports = pa_hashmap_new_full(pa_idxset_string_hash_func,
-                                        pa_idxset_string_compare_func,
-                                        NULL,
-                                        (pa_free_cb_t) pa_classify_port_entry_free);
+    devdef->ports = pa_idxset_new(NULL, NULL);
 
     if ((entries = split_strv(portsdef, ","))) {
         char *entry; /* This string has format "sinkname:portname". */
         int i = 0;
 
         while ((entry = entries[i++])) {
-            struct pa_classify_port_entry *port;
+            struct pa_classify_port_config_entry *port;
             size_t entry_len;
             size_t colon_pos;
 
@@ -1569,15 +1582,85 @@ static int ports_parse(int lineno, const char *portsdef,
                 continue;
             }
 
-            port = pa_xnew(struct pa_classify_port_entry, 1);
-            port->device_name = pa_xstrndup(entry, colon_pos);
+            port = pa_xnew0(struct pa_classify_port_config_entry, 1);
+            port->method    = pa_object_name;
+            port->prop      = pa_xstrdup("(name)");
+            port->arg       = pa_xstrndup(entry, colon_pos);
             port->port_name = pa_xstrdup(entry + colon_pos + 1);
 
-            if (pa_hashmap_put(devdef->ports, port->device_name, port) < 0) {
+            if (pa_idxset_put(devdef->ports, port, NULL) < 0) {
                 pa_log("Duplicate device name in port entry '%s' in line %d, "
                        "using the first occurrence", entry, lineno);
+                port_config_entry_free(port);
+            }
+        }
 
-                pa_classify_port_entry_free(port);
+        pa_xstrfreev(entries);
+
+    } else
+        pa_log_warn("Empty ports= definition in line %d", lineno);
+
+    return 0;
+}
+
+static int ports_parse_new(int lineno, const char *portsdef,
+                           struct devicedef *devdef)
+{
+    char **entries;
+
+    if (devdef->ports) {
+        pa_log("Duplicate ports= line in line %d, using the last "
+               "occurrence.", lineno);
+
+        pa_idxset_free(devdef->ports, port_config_entry_free);
+    }
+
+    devdef->ports = pa_idxset_new(NULL, NULL);
+
+    if ((entries = split_strv(portsdef, ","))) {
+        char *entry; /* This string has format "device_definition->portname". */
+        char *arrow;
+        char *port_name;
+        int i = 0;
+
+        while ((entry = entries[i++])) {
+            struct pa_classify_port_config_entry *port;
+
+            if (!*entry) {
+                pa_log_debug("Ignoring a redundant comma in line %d", lineno);
+                continue;
+            }
+
+            arrow = strstr(entry, DEV_PORT_SEPARATOR);
+
+            if (!arrow) {
+                pa_log("Arrow missing in port entry '%s' in line %d, ignoring "
+                       "the entry", entry, lineno);
+                continue;
+            } else if (arrow == entry) {
+                pa_log("Empty device definition in port entry '%s' in line %d, "
+                       "ignoring the entry", entry, lineno);
+                continue;
+            } else if (strlen(arrow) <= DEV_PORT_SEPARATOR_LEN) {
+                pa_log("Empty port name in port entry '%s' in line %d, "
+                       "ignoring the entry", entry, lineno);
+                continue;
+            }
+
+            port_name = arrow + DEV_PORT_SEPARATOR_LEN;
+            arrow[0] = '\0';
+
+            port = pa_xnew0(struct pa_classify_port_config_entry, 1);
+            if (method_parse(lineno, entry, &port->method, &port->prop, &port->arg) == 0) {
+                port->port_name = pa_xstrdup(port_name);
+
+                if (pa_idxset_put(devdef->ports, port, NULL) < 0) {
+                    pa_log("Duplicate device name in port entry '%s' in line %d, "
+                           "using the first occurrence", entry, lineno);
+                    port_config_entry_free(port);
+                }
+            } else {
+                port_config_entry_free(port);
             }
         }
 
