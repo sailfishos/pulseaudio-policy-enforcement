@@ -20,6 +20,10 @@ struct pa_sink_ext {
     int   need_volume_setting;
 };
 
+typedef void (*pa_sink_ext_pending_cb)(struct userdata *u);
+
+struct pa_sink_ext_data *pa_sink_ext_new();
+void pa_sink_ext_free(struct pa_sink_ext_data *ext);
 struct pa_null_sink *pa_sink_ext_init_null_sink(const char *);
 void pa_sink_ext_null_sink_free(struct pa_null_sink *);
 struct pa_sink_evsubscr *pa_sink_ext_subscription(struct userdata *);
@@ -31,6 +35,8 @@ int pa_sink_ext_set_ports(struct userdata *, const char *);
 void pa_sink_ext_set_volumes(struct userdata *);
 void pa_sink_ext_override_port(struct userdata *, struct pa_sink *, char *);
 void pa_sink_ext_restore_port(struct userdata *, struct pa_sink *);
+void pa_sink_ext_pending_start(struct userdata *u);
+void pa_sink_ext_pending_run(struct userdata *u, pa_sink_ext_pending_cb cb);
 
 #endif /* foosinkextfoo */
 

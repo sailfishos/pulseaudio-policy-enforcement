@@ -139,6 +139,7 @@ int pa__init(pa_module *m) {
     u->context  = pa_policy_context_new(u);
     u->dbusif   = pa_policy_dbusif_init(u, ifnam, mypath, pdpath, pdnam, route_sources_first);
     u->vars     = pa_policy_var_init();
+    u->sinkext  = pa_sink_ext_new();
     u->shared   = pa_shared_data_get(u->core);
 
     if (u->scl == NULL      || u->ssnk == NULL     || u->ssrc == NULL ||
@@ -167,6 +168,9 @@ int pa__init(pa_module *m) {
     pa_source_output_ext_discover(u);
     pa_card_ext_discover(u);
     pa_module_ext_discover(u);
+    /* variables are not used after initialization */
+    pa_policy_var_done(u->vars);
+    u->vars = NULL;
 
     pa_modargs_free(ma);
     
@@ -193,6 +197,7 @@ void pa__done(pa_module *m) {
     pa_policy_dbusif_done(u);
     pa_policy_var_done(u->vars);
 
+    pa_sink_ext_free(u->sinkext);
     pa_client_ext_subscription_free(u->scl);
     pa_sink_ext_subscription_free(u->ssnk);
     pa_source_ext_subscription_free(u->ssrc);

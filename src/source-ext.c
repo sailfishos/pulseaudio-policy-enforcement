@@ -140,8 +140,9 @@ int pa_source_ext_set_ports(struct userdata *u, const char *type)
         if (pa_classify_is_port_source_typeof(u, source, type, &data)) {
             struct pa_classify_port_entry *port_entry;
 
-            pa_assert_se(port_entry = pa_hashmap_get(data->ports,
-                                                     source->name));
+            pa_assert_se(port_entry = pa_classify_get_port_entry(data,
+                                                                 pa_policy_object_source,
+                                                                 source));
 
             pa_classify_update_module(u, PA_POLICY_MODULE_FOR_SOURCE, data);
 
@@ -236,6 +237,8 @@ static void handle_new_source(struct userdata *u, struct pa_source *source)
         pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0, &r);
         pa_policy_send_device_state(u, PA_POLICY_CONNECTED, r);
         pa_xfree(r);
+
+        pa_policy_groupset_update_sources(u);
     }
 }
 

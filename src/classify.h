@@ -2,8 +2,8 @@
 #define fooclassifyfoo
 
 #include <sys/types.h>
-#include <regex.h>
 
+#include "match.h"
 #include "userdata.h"
 
 #define PA_POLICY_PID_HASH_BITS  6
@@ -31,50 +31,26 @@
 #define PA_POLICY_MODULE_FOR_SOURCE (1)
 #define PA_POLICY_MODULE_COUNT      (2)
 
+#define PA_POLICY_CARD_MAX_DEFS     (2)
+
 struct pa_sink;
 struct pa_source;
 struct pa_sink_input;
 struct pa_sink_input_new_data;
 struct pa_card;
 
-enum pa_classify_method {
-    pa_method_unknown = 0,
-    pa_method_min = pa_method_unknown,
-    pa_method_equals,
-    pa_method_startswith,
-    pa_method_matches,
-    pa_method_true,
-    pa_method_max
-};
-
-union pa_classify_arg {
-    char       *string;
-    regex_t     rexp;
-};
-
 struct pa_classify_pid_hash {
     struct pa_classify_pid_hash *next;
     pid_t                        pid;   /* process id (or parent process id) */
                                         /* for stream classification */
-    char                        *prop;  /*     stream property, if any  */
-    struct {
-        enum pa_classify_method type;
-        int                   (*func)(const char *,union pa_classify_arg *);
-    }                            method;
-    struct {
-        char                 *def;
-        union pa_classify_arg value;
-    }                            arg;   /*     argument */
+    pa_policy_match_object      *pid_match;
     char                        *group; /* policy group name */
 };
 
 struct pa_classify_stream_def {
     struct pa_classify_stream_def *next;
                                           /* for stream classification */
-    char                          *prop;  /*   stream property */
-    int                          (*method)(const char *,
-                                           union pa_classify_arg *);
-    union pa_classify_arg          arg;   /*   argument */
+    pa_policy_match_object        *stream_match;
     uid_t                          uid;   /* user id, if any */
     char                          *exe;   /* exe name, if any */
     char                          *clnam; /* client name, if any */
@@ -90,29 +66,33 @@ struct pa_classify_stream {
     struct pa_classify_stream_def *defs;
 };
 
+struct pa_classify_port_config_entry {
+    enum pa_classify_method      method;
+    char                        *prop;
+    char                        *arg;
+    char                        *port_name;
+};
 
 struct pa_classify_port_entry {
-    char *device_name; /* Sink or source name */
-    char *port_name;
+    pa_policy_match_object      *device_match;
+    char                        *port_name;
 };
 
 struct pa_classify_device_data {
-    pa_hashmap *ports; /* Key: device name, value: pa_classify_port_entry. If
+    pa_idxset  *ports; /* Contains pa_classify_port_entry structs. If
                         * the device type doesn't require setting any ports,
                         * this is NULL. */
     char       *module;     /* If module is defined for device when device
                              * is activated that module is loaded. */
     char       *module_args;
     uint32_t    flags; /* PA_POLICY_DISABLE_NOTIFY, etc */
+    uint32_t    port_change_delay;  /* Used if delayed port change is set */
 };
 
 struct pa_classify_device_def {
     char                            *type;  /* device type, e.g. ihf */
                                             /* for classification */
-    char                            *prop;  /*   sink/source property */
-    int                            (*method)(const char *,
-                                             union pa_classify_arg *);
-    union pa_classify_arg            arg;   /*   argument */
+    pa_policy_match_object          *dev_match;
     struct pa_classify_device_data   data;  /* data associated with device */
 };
 
@@ -124,8 +104,7 @@ struct pa_classify_device {
 struct pa_classify_card_data {
     char                        *profile; /* name of profile */
     uint32_t                     flags;   /* PA_POLICY_DISABLE_NOTIFY, etc */
-    int                        (*method)(const char *,union pa_classify_arg *);
-    union pa_classify_arg        arg;
+    pa_policy_match_object      *card_match;
 };
 
 struct pa_classify_card_def {
@@ -162,21 +141,20 @@ struct pa_classify_result {
 struct pa_classify *pa_classify_new(struct userdata *);
 void  pa_classify_free(struct userdata *u);
 void  pa_classify_add_sink(struct userdata *, const char *, const char *,
-                           enum pa_classify_method, const char *, pa_hashmap *,
+                           enum pa_classify_method, const char *, pa_idxset *,
                            const char *module, const char *module_args,
-                           uint32_t);
+                           uint32_t flags, uint32_t port_change_delay);
 void  pa_classify_add_source(struct userdata *, const char *, const char *,
-                             enum pa_classify_method, const char *, pa_hashmap *,
+                             enum pa_classify_method, const char *, pa_idxset *,
                              const char *module, const char *module_args,
                              uint32_t);
 void  pa_classify_add_card(struct userdata *, char *,
-                           enum pa_classify_method[2], char **, char **, uint32_t[2]);
+                           enum pa_classify_method[PA_POLICY_CARD_MAX_DEFS], char **, char **,
+                           uint32_t[PA_POLICY_CARD_MAX_DEFS]);
 void  pa_classify_add_stream(struct userdata *, const char *,enum pa_classify_method,
                              const char *, const char *, const char *, uid_t, const char *, const char *,
                              uint32_t, const char *);
 void  pa_classify_update_stream_route(struct userdata *u, const char *sname);
-
-void  pa_classify_port_entry_free(struct pa_classify_port_entry *);
 
 void  pa_classify_register_pid(struct userdata *, pid_t, const char *,
                                enum pa_classify_method, const char *, const char *);
@@ -217,15 +195,12 @@ int pa_classify_is_port_sink_typeof(struct userdata *, struct pa_sink *,
 int pa_classify_is_port_source_typeof(struct userdata *, struct pa_source *,
                                       const char *,
                                       struct pa_classify_device_data **);
+struct pa_classify_port_entry *pa_classify_get_port_entry(struct pa_classify_device_data *,
+                                                          enum pa_policy_object_type,
+                                                          void *);
 
 int pa_classify_update_module(struct userdata *u, uint32_t dir, struct pa_classify_device_data *device);
 void pa_classify_update_modules(struct userdata *u, uint32_t dir, const char *type);
-
-const char *pa_classify_method_str(enum pa_classify_method method);
-int   pa_classify_method_equals(const char *, union pa_classify_arg *);
-int   pa_classify_method_startswith(const char *, union pa_classify_arg *);
-int   pa_classify_method_matches(const char *, union pa_classify_arg *);
-int   pa_classify_method_true(const char *, union pa_classify_arg *);
 
 #endif
 

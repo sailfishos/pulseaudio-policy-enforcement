@@ -99,8 +99,8 @@ int pa_card_ext_set_profile(struct userdata *u, char *type)
     pa_idxset       *idxset;
     struct pa_card  *card;
     struct pa_classify_card_data *data;
-    struct pa_classify_card_data *datas[2] = { NULL, NULL };
-    struct pa_card  *cards[2] = { NULL, NULL };
+    struct pa_classify_card_data *datas[PA_POLICY_CARD_MAX_DEFS] = { NULL, NULL };
+    struct pa_card  *cards[PA_POLICY_CARD_MAX_DEFS] = { NULL, NULL };
     int              priority;
     const char      *pn;
     const char      *override_pn;
@@ -129,7 +129,7 @@ int pa_card_ext_set_profile(struct userdata *u, char *type)
         }
     }
 
-    for (i = 0; i < 2 && datas[i]; i++) {
+    for (i = 0; i < PA_POLICY_CARD_MAX_DEFS && datas[i]; i++) {
 
         data = datas[i];
         card = cards[i];

@@ -22,6 +22,8 @@
 #include "classify.h"
 #include "context.h"
 
+#define VOLUME_LIMIT_FACTOR_KEY "x-policy.volume.factor"
+
 /* hooks */
 static pa_hook_result_t sink_input_neew(void *, void *, void *);
 static pa_hook_result_t sink_input_fixate(void *, void *, void *);
@@ -209,23 +211,27 @@ const char *pa_sink_input_ext_get_name(struct pa_sink_input *sinp)
     return sink_input_ext_get_name(sinp->proplist);
 }
 
+static void sink_input_ext_unset_volume_limit(struct pa_sink_input_ext *ext, struct pa_sink_input *si)
+{
+    pa_assert(ext);
+    pa_assert(si);
+
+    if (ext->local.volume_limit_enabled) {
+        ext->local.volume_limit_enabled = false;
+        pa_sink_input_remove_volume_factor(si, VOLUME_LIMIT_FACTOR_KEY);
+    }
+}
 
 int pa_sink_input_ext_set_volume_limit(struct userdata *u,
                                        struct pa_sink_input *sinp,
                                        pa_volume_t limit)
 {
-    pa_sink     *sink;
-    int          retval;
-    uint64_t     limit64;
-    pa_volume_t  value;
-    pa_cvolume  *factor;
-    pa_cvolume  *real;
-    int          changed;
-    int          i;
+    struct pa_sink_input_ext   *ext;
+    pa_cvolume                  volume;
+    int                         retval;
 
     pa_assert(u);
     pa_assert(sinp);
-    pa_assert_se((sink = sinp->sink));
 
     retval = 0;
 
@@ -237,37 +243,14 @@ int pa_sink_input_ext_set_volume_limit(struct userdata *u,
         if (limit > PA_VOLUME_NORM)
             limit = PA_VOLUME_NORM;
 
-        factor  = &sinp->volume_factor;
-        real    = &sinp->real_ratio;
-        limit64 = (uint64_t)limit * (uint64_t)PA_VOLUME_NORM;
-        changed = false;
-
-        if (real->channels != factor->channels) {
-            pa_log_debug("channel number mismatch");
+        if (!(ext = pa_sink_input_ext_lookup(u, sinp)))
             retval = -1;
-        }
         else {
-            for (i = 0;   i < factor->channels;   i++) {
-                if (limit < real->values[i])
-                    value = limit64 / (uint64_t)real->values[i];
-                else
-                    value = PA_VOLUME_NORM;
-
-                if (value != factor->values[i]) {
-                    changed = 1;
-                    factor->values[i] = value;
-                }
-            }
-
-            if (changed) {
-                if (pa_sink_flat_volume_enabled(sink))
-                    retval = 1;
-                else {
-                    pa_sw_cvolume_multiply(&sinp->soft_volume, real, factor);
-                    pa_asyncmsgq_send(sink->asyncmsgq, PA_MSGOBJECT(sinp),
-                                      PA_SINK_INPUT_MESSAGE_SET_SOFT_VOLUME,
-                                      NULL, 0, NULL);
-                }
+            sink_input_ext_unset_volume_limit(ext, sinp);
+            if (limit < PA_VOLUME_NORM) {
+                ext->local.volume_limit_enabled = true;
+                pa_cvolume_set(&volume, sinp->sample_spec.channels, limit);
+                pa_sink_input_add_volume_factor(sinp, VOLUME_LIMIT_FACTOR_KEY, &volume);
             }
         }
     }
@@ -275,8 +258,16 @@ int pa_sink_input_ext_set_volume_limit(struct userdata *u,
     return retval;
 }
 
+void  pa_sink_input_ext_unset_volume_limit(struct userdata *u, struct pa_sink_input *si)
+{
+    struct pa_sink_input_ext *ext;
 
- 
+    if (!(ext = pa_sink_input_ext_lookup(u, si)))
+        return;
+
+    sink_input_ext_unset_volume_limit(ext, si);
+}
+
 static pa_hook_result_t sink_input_neew(void *hook_data, void *call_data,
                                        void *slot_data)
 {
@@ -482,13 +473,17 @@ static void handle_new_sink_input(struct userdata      *u,
     uint32_t    flags = 0;
 
     if (sinp && u) {
+        ext = pa_xmalloc0(sizeof(struct pa_sink_input_ext));
+        ext->local.route = (flags & PA_POLICY_LOCAL_ROUTE) ? true : false;
+        ext->local.mute  = (flags & PA_POLICY_LOCAL_MUTE ) ? true : false;
+
+        if (pa_hashmap_get(sinp->volume_factor_items, VOLUME_LIMIT_FACTOR_KEY))
+            ext->local.volume_limit_enabled = true;
+
         idx  = sinp->index;
         sinp_name = sink_input_ext_get_name(sinp->proplist);
         pa_assert_se((group = get_group_or_classify(u, sinp, &flags)));
 
-        ext = pa_xmalloc0(sizeof(struct pa_sink_input_ext));
-        ext->local.route = (flags & PA_POLICY_LOCAL_ROUTE) ? true : false;
-        ext->local.mute  = (flags & PA_POLICY_LOCAL_MUTE ) ? true : false;
         if (preserve_cork_state)
             ext->local.cork_state = *preserve_cork_state;
         else
@@ -716,7 +711,9 @@ static void handle_sink_input_fixate(struct userdata *u,
                        sinp_data->channel_map.channels,
                        group->limit);
 
-        pa_sink_input_new_data_add_volume_factor(sinp_data, sinp_name, &group_limit);
+        /* we need to check in handle_new_sink_input() if the volume limit was applied,
+         * and update our internal data structure. */
+        pa_sink_input_new_data_add_volume_factor(sinp_data, VOLUME_LIMIT_FACTOR_KEY, &group_limit);
     }
 }
 

@@ -8,6 +8,8 @@
 #endif
 #include <pulsecore/dbus-shared.h>
 #include <pulsecore/core-util.h>
+#include <meego/shared-data.h>
+#include <sailfishos/defines.h>
 
 #include "userdata.h"
 #include "dbusif.h"
@@ -663,6 +665,12 @@ static int action_parser(DBusMessageIter *actit, struct argdsc *descs,
     return true;
 }
 
+static void port_changes_done_cb(struct userdata *u)
+{
+    pa_shared_data_inc_integer(u->shared, PA_SAILFISHOS_MEDIA_VOLUME_SYNC,
+                                          PA_SAILFISHOS_MEDIA_VOLUME_CHANGE_DONE);
+}
+
 static int audio_route_parser(struct userdata *u, DBusMessageIter *actit)
 {
     static struct argdsc descs[] = {
@@ -682,6 +690,7 @@ static int audio_route_parser(struct userdata *u, DBusMessageIter *actit)
     int num_moving = 0;
     bool result = true;
     bool route_changed = false;
+    bool sink_route_changed = false;
 
     /* Parse message. It's safe to bail out here, because we're not moving any streams yet. */
     do {
@@ -721,8 +730,12 @@ static int audio_route_parser(struct userdata *u, DBusMessageIter *actit)
                 !pa_streq(pa_strempty(pa_proplist_gets(p, PROP_ROUTE_SINK_MODE  )), decisions[i].mode)   ||
                 !pa_streq(pa_strempty(pa_proplist_gets(p, PROP_ROUTE_SINK_HWID  )), decisions[i].hwid)) {
 
-                route_changed = true;
+                sink_route_changed = route_changed = true;
+                pa_sink_ext_pending_start(u);
                 pa_log_debug("Sink route has changed");
+
+                pa_shared_data_inc_integer(u->shared, PA_SAILFISHOS_MEDIA_VOLUME_SYNC,
+                                                      PA_SAILFISHOS_MEDIA_VOLUME_CHANGING);
             }
         } else {
             if (!pa_streq(pa_strempty(pa_proplist_gets(p, PROP_ROUTE_SOURCE_TARGET)), decisions[i].target) ||
@@ -821,6 +834,9 @@ static int audio_route_parser(struct userdata *u, DBusMessageIter *actit)
         pa_policy_group_assert_moving(u);
         result = false;
     }
+
+    if (sink_route_changed)
+        pa_sink_ext_pending_run(u, port_changes_done_cb);
 
     return result;
 }

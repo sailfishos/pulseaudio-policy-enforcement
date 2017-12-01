@@ -29,6 +29,7 @@ struct pa_classify;
 struct pa_policy_context;
 struct pa_policy_dbusif;
 struct pa_policy_variable;
+struct pa_sink_ext_data;
 
 struct userdata {
     pa_core                   *core;
@@ -48,6 +49,7 @@ struct userdata {
     struct pa_policy_context  *context;  /* for processing context variables */
     struct pa_policy_dbusif   *dbusif;
     struct pa_policy_variable *vars;
+    struct pa_sink_ext_data   *sinkext;
     pa_shared_data            *shared;   /* for forwarding context etc properties */
 };
 

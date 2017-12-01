@@ -38,6 +38,11 @@
 #define DEFAULT_CONFIG_FILE        "xpolicy.conf"
 #define DEFAULT_CONFIG_DIRECTORY   "/etc/pulse/xpolicy.conf.d"
 
+#define DEFAULT_PORT_CHANGE_DELAY_MS (200)
+
+#define DEV_PORT_SEPARATOR         "->"
+#define DEV_PORT_SEPARATOR_LEN     (2)
+
 enum section_type {
     section_unknown = 0,
     section_group,
@@ -101,9 +106,16 @@ struct ctxact {                          /* context rule actions */
 struct groupdef {
     char                    *name;
     char                    *sink;
+    enum pa_classify_method  sink_method;
+    char                    *sink_prop;
+    char                    *sink_arg;
     char                    *source;
+    enum pa_classify_method  source_method;
+    char                    *source_prop;
+    char                    *source_arg;
     pa_proplist             *properties;
-    uint32_t                 flags;
+    char                    *flags;
+    int                      flags_lineno;
 };
 
 struct devicedef {
@@ -112,11 +124,13 @@ struct devicedef {
     char                    *prop;
     enum pa_classify_method  method;
     char                    *arg;
-    pa_hashmap              *ports; /* Key: device name, value:
-                                     * pa_classify_port_entry. */
+    pa_idxset               *ports;
     char                    *module;
     char                    *module_args;
-    uint32_t                 flags;
+    char                    *delay;
+    int                      delay_lineno;
+    char                    *flags;
+    int                      flags_lineno;
 };
 
 struct carddef {
@@ -124,7 +138,8 @@ struct carddef {
     enum pa_classify_method  method[2];
     char                    *arg[2];
     char                    *profile[2];
-    uint32_t                 flags[2];
+    char                    *flags[2];
+    int                      flags_lineno[2];
 };
 
 struct streamdef {
@@ -136,7 +151,8 @@ struct streamdef {
     uid_t                    uid;    /* client's user id */
     char                    *exe;    /* the executable name (i.e. argv[0]) */
     char                    *group;  /* group name the stream belong to */
-    uint32_t                 flags;  /* stream flags */
+    char                    *flags;  /* stream flags */
+    int                      flags_lineno;
     char                    *port;   /* port for local routing, if any */
 };
 
@@ -195,8 +211,13 @@ static int contextdef_parse(int, char *, struct contextdef *);
 static int activitydef_parse(int, char *, struct activitydef *);
 static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_value);
 
-static int deviceprop_parse(int, enum device_class,char *,struct devicedef *);
-static int ports_parse(int, const char *, struct devicedef *);
+static int method_parse(int lineno, char *definition,
+                        enum pa_classify_method *method_val,
+                        char **method_prop,
+                        char **method_arg);
+static int ports_parse_old(int, const char *, struct devicedef *);
+static int ports_parse_new(int, const char *, struct devicedef *);
+static void port_config_entry_free(void *data);
 static int module_parse(int, const char *, struct devicedef *);
 static int streamprop_parse(int, char *, struct streamdef *);
 static int contextval_parse(int, char *, enum pa_classify_method *method, char **arg);
@@ -206,7 +227,8 @@ static int contextsetdef_parse(int lineno, char *setdefdef, int *nact, struct ct
 static int contextoverride_parse(int lineno, char *setdefdef, int *nact, struct ctxact **acts);
 static int contextanyprop_parse(int, char *, char *, struct anyprop *);
 static int cardname_parse(int, char *, struct carddef *, int field);
-static int flags_parse(int, char *, enum section_type, uint32_t *);
+static int flags_parse(struct userdata *u, int, const char *, enum section_type, uint32_t *);
+static void delay_parse(struct userdata *u, int, const char *, uint32_t *);
 static int valid_label(int, char *);
 const char *policy_file_path(const char *file, char *buf, size_t len);
 
@@ -680,6 +702,140 @@ done:
     return ret;
 }
 
+static void section_free(struct section *sec) {
+    struct ctxact      *act;
+    struct setprop     *setprop;
+    struct delprop     *delprop;
+    struct setdef      *setdef;
+    int                 i;
+
+    switch (sec->type) {
+        case section_group:
+            pa_xfree(sec->def.group->name);
+            pa_xfree(sec->def.group->sink);
+            pa_xfree(sec->def.group->sink_prop);
+            pa_xfree(sec->def.group->sink_arg);
+            pa_xfree(sec->def.group->source);
+            pa_xfree(sec->def.group->source_prop);
+            pa_xfree(sec->def.group->source_arg);
+            pa_xfree(sec->def.group->flags);
+            pa_xfree(sec->def.group);
+            break;
+
+        case section_device:
+            if (sec->def.device->ports)
+                pa_idxset_free(sec->def.device->ports, port_config_entry_free);
+            pa_xfree(sec->def.device->type);
+            pa_xfree(sec->def.device->prop);
+            pa_xfree(sec->def.device->arg);
+            pa_xfree(sec->def.device->module);
+            pa_xfree(sec->def.device->module_args);
+            pa_xfree(sec->def.device->flags);
+            pa_xfree(sec->def.device->delay);
+            pa_xfree(sec->def.device);
+            break;
+
+        case section_card:
+            pa_xfree(sec->def.card->type);
+            for (i = 0; i < PA_POLICY_CARD_MAX_DEFS; i++) {
+                pa_xfree(sec->def.card->arg[i]);
+                pa_xfree(sec->def.card->profile[i]);
+                pa_xfree(sec->def.card->flags[i]);
+            }
+            pa_xfree(sec->def.card);
+            break;
+
+        case section_stream:
+            pa_xfree(sec->def.stream->prop);
+            pa_xfree(sec->def.stream->arg);
+            pa_xfree(sec->def.stream->clnam);
+            pa_xfree(sec->def.stream->sname);
+            pa_xfree(sec->def.stream->exe);
+            pa_xfree(sec->def.stream->group);
+            pa_xfree(sec->def.stream->port);
+            pa_xfree(sec->def.stream);
+            break;
+
+        case section_context:
+            for (i = 0; i < sec->def.context->nact; i++) {
+                act = sec->def.context->acts + i;
+                switch (act->type) {
+                    case pa_policy_set_property:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+
+                    case pa_policy_delete_property:
+                        delprop = &act->delprop;
+                        pa_xfree(delprop->arg);
+                        pa_xfree(delprop->propnam);
+                        break;
+
+                    case pa_policy_set_default:
+                        setdef = &act->setdef;
+                        pa_xfree(setdef->activity_group);
+                        break;
+
+                    case pa_policy_override:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+            pa_xfree(sec->def.context->varnam);
+            pa_xfree(sec->def.context->arg);
+            pa_xfree(sec->def.context->acts);
+            pa_xfree(sec->def.context);
+            break;
+
+        case section_activity:
+            for (i = 0; i < sec->def.activity->active_nact; i++) {
+                act = sec->def.activity->active_acts + i;
+                switch (act->type) {
+                    case pa_policy_set_property:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            for (i = 0; i < sec->def.activity->inactive_nact; i++) {
+                act = sec->def.activity->inactive_acts + i;
+                switch (act->type) {
+                    case pa_policy_set_property:
+                        setprop = &act->setprop;
+                        pa_xfree(setprop->arg);
+                        pa_xfree(setprop->propnam);
+                        pa_xfree(setprop->valarg);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            pa_xfree(sec->def.activity->name);
+            pa_xfree(sec->def.activity->active_acts);
+            pa_xfree(sec->def.activity->inactive_acts);
+            pa_xfree(sec->def.activity);
+            break;
+
+        case section_variable:
+            break;
+
+        default:
+            break;
+    }
+}
+
 static int section_close(struct userdata *u, struct section *sec)
 {
     struct groupdef   *grdef;
@@ -693,33 +849,38 @@ static int section_close(struct userdata *u, struct section *sec)
     struct setprop    *setprop;
     struct delprop    *delprop;
     struct setdef     *setdef;
-    int                i;
+    uint32_t           delay = DEFAULT_PORT_CHANGE_DELAY_MS;
+    uint32_t           card_flags[2] = { 0, 0};
+    uint32_t           flags = 0;
     int                status = 0;
+    int                i;
 
     if (sec == NULL)
         status = 0;
     else {
         switch (sec->type) {
-            
+
         case section_group:
             status = 1;
             grdef  = sec->def.group;
 
+            flags_parse(u, grdef->flags_lineno, grdef->flags, section_group, &flags);
+
             /* Transfer ownership of grdef->properties */
             pa_policy_group_new(u, grdef->name,   grdef->sink,
-                                   grdef->source, grdef->properties,
-                                   grdef->flags);
-
-            pa_xfree(grdef->name);
-            pa_xfree(grdef->sink);
-            pa_xfree(grdef->source);
-            pa_xfree(grdef);
-
+                                   grdef->sink_method, grdef->sink_arg, grdef->sink_prop,
+                                   grdef->source,
+                                   grdef->source_method, grdef->source_arg, grdef->source_prop,
+                                   grdef->properties,
+                                   flags);
             break;
-            
+
         case section_device:
             status = 1;
             devdef = sec->def.device;
+
+            flags_parse(u, devdef->flags_lineno, devdef->flags, section_device, &flags);
+            delay_parse(u, devdef->delay_lineno, devdef->delay, &delay);
 
             switch (devdef->class) {
 
@@ -729,7 +890,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                      devdef->prop, devdef->method, devdef->arg,
                                      devdef->ports,
                                      devdef->module, devdef->module_args,
-                                     devdef->flags);
+                                     flags, delay);
                 break;
 
             case device_source:
@@ -738,22 +899,12 @@ static int section_close(struct userdata *u, struct section *sec)
                                        devdef->prop, devdef->method,
                                        devdef->arg, devdef->ports,
                                        devdef->module, devdef->module_args,
-                                       devdef->flags);
+                                       flags);
                 break;
 
             default:
                 break;
             }
-
-            if (devdef->ports)
-                pa_hashmap_free(devdef->ports);
-
-            pa_xfree(devdef->type);
-            pa_xfree(devdef->prop);
-            pa_xfree(devdef->arg);
-            pa_xfree(devdef->module);
-            pa_xfree(devdef->module_args);
-            pa_xfree(devdef);
 
             break;
 
@@ -761,16 +912,13 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             carddef = sec->def.card;
 
+            for (i = 0; i < PA_POLICY_CARD_MAX_DEFS; i++)
+                flags_parse(u, carddef->flags_lineno[i], carddef->flags[i], section_card, &card_flags[i]);
+
             pa_classify_add_card(u, carddef->type, carddef->method,
                                  carddef->arg, carddef->profile,
-                                 carddef->flags);
+                                 card_flags);
 
-            pa_xfree(carddef->type);
-            for (i = 0; i < 2; i++) {
-                pa_xfree(carddef->arg[i]);
-                pa_xfree(carddef->profile[i]);
-            }
-            pa_xfree(carddef);
 
             break;
 
@@ -778,21 +926,14 @@ static int section_close(struct userdata *u, struct section *sec)
             status = 1;
             strdef = sec->def.stream;
 
+            flags_parse(u, strdef->flags_lineno, strdef->flags, section_stream, &flags);
+
             if (strdef->port)
-                strdef->flags |= PA_POLICY_LOCAL_ROUTE;
+                flags |= PA_POLICY_LOCAL_ROUTE;
 
             pa_classify_add_stream(u, strdef->prop,strdef->method,strdef->arg,
                                    strdef->clnam, strdef->sname, strdef->uid, strdef->exe,
-                                   strdef->group, strdef->flags, strdef->port);
-
-            pa_xfree(strdef->prop);
-            pa_xfree(strdef->arg);
-            pa_xfree(strdef->clnam);
-            pa_xfree(strdef->sname);
-            pa_xfree(strdef->exe);
-            pa_xfree(strdef->group);
-            pa_xfree(strdef->port);
-            pa_xfree(strdef);
+                                   strdef->group, flags, strdef->port);
 
             break;
 
@@ -824,11 +965,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setprop->valarg
                         );
                     }
-
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
 
                 case pa_policy_delete_property:
@@ -844,10 +980,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                           delprop->propnam
                         );
                     }
-
-                    pa_xfree(delprop->arg);
-                    pa_xfree(delprop->propnam);
-
                     break;
 
                 case pa_policy_set_default:
@@ -860,8 +992,6 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setdef->activity_group,
                                           setdef->default_state);
                     }
-
-                    pa_xfree(setdef->activity_group);
 
                     break;
 
@@ -881,21 +1011,12 @@ static int section_close(struct userdata *u, struct section *sec)
                         );
                     }
 
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
 
                 default:
                     break;
                 }
             }
-
-            pa_xfree(ctxdef->varnam);
-            pa_xfree(ctxdef->arg);
-            pa_xfree(ctxdef->acts);
-            pa_xfree(ctxdef);
 
             break;
 
@@ -931,10 +1052,6 @@ static int section_close(struct userdata *u, struct section *sec)
                         );
                     }
 
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
                 default:
                     break;
@@ -969,20 +1086,11 @@ static int section_close(struct userdata *u, struct section *sec)
                         );
                     }
 
-                    pa_xfree(setprop->arg);
-                    pa_xfree(setprop->propnam);
-                    pa_xfree(setprop->valarg);
-
                     break;
                 default:
                     break;
                 }
             }
-
-            pa_xfree(actdef->name);
-            pa_xfree(actdef->active_acts);
-            pa_xfree(actdef->inactive_acts);
-            pa_xfree(actdef);
 
             break;
 
@@ -999,6 +1107,8 @@ static int section_close(struct userdata *u, struct section *sec)
         sec->def.any = NULL;
     }
 
+    section_free(sec);
+
     return status;
 }
 
@@ -1007,11 +1117,6 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
 {
     int       sts = 0;
     char     *end;
-    char     *comma;
-    char     *fldef;
-    char     *flname;
-    int       len;
-    uint32_t  flags;
 
     if (grdef == NULL)
         sts = -1;
@@ -1023,10 +1128,22 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
                 grdef->name = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "sink=", 5)) {
-            grdef->sink = pa_xstrdup(line+5);
+            if (strchr(line, ':'))
+                sts = method_parse(lineno, line+5,
+                                   &grdef->sink_method,
+                                   &grdef->sink_prop,
+                                   &grdef->sink_arg);
+            else
+                grdef->sink = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "source=", 7)) {
-            grdef->source = pa_xstrdup(line+7);
+            if (strchr(line, ':'))
+                sts = method_parse(lineno, line+7,
+                                   &grdef->source_method,
+                                   &grdef->source_prop,
+                                   &grdef->source_arg);
+            else
+                grdef->source = pa_xstrdup(line+7);
         }
         else if (!strncmp(line, "properties=", 11)) {
             grdef->properties = pa_proplist_from_string(line + 11);
@@ -1035,57 +1152,8 @@ static int groupdef_parse(int lineno, char *line, struct groupdef *grdef)
                 pa_log("incorrect syntax in line %d (%s)", lineno, line + 11);
         }
         else if (!strncmp(line, "flags=", 6)) { 
-            fldef = line + 6;
-            
-            if (fldef[0] == '\0') {
-                sts = -1;
-                pa_log("missing flag definition in line %d", lineno);
-            }
-            else {
-                sts = 0;
-
-                if (!strcmp(fldef, "client"))
-                    flags = PA_POLICY_GROUP_FLAGS_CLIENT;
-                else if (!strcmp(fldef, "nopolicy"))
-                    flags = PA_POLICY_GROUP_FLAGS_NOPOLICY;
-                else {
-                    flags = 0;
-
-                    for (flname = fldef;  *flname;  flname += len) {
-                        if ((comma = strchr(flname, ',')) == NULL)
-                            len = strlen(flname);
-                        else {
-                            *comma = '\0';
-                            len = (comma - flname) + 1;
-                        }
-
-                        if (!strcmp(flname, "set_sink"))
-                            flags |= PA_POLICY_GROUP_FLAG_SET_SINK;
-                        else if (!strcmp(flname, "set_source"))
-                            flags |= PA_POLICY_GROUP_FLAG_SET_SOURCE;
-                        else if (!strcmp(flname, "route_audio"))
-                            flags |= PA_POLICY_GROUP_FLAG_ROUTE_AUDIO;
-                        else if (!strcmp(flname, "limit_volume"))
-                            flags |= PA_POLICY_GROUP_FLAG_LIMIT_VOLUME;
-                        else if (!strcmp(flname, "cork_stream"))
-                            flags |= PA_POLICY_GROUP_FLAG_CORK_STREAM;
-                        else if (!strcmp(flname, "mute_by_route"))
-                            flags |= PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE;
-                        else if (!strcmp(flname, "media_notify"))
-                            flags |= PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY;
-                        else {
-                            pa_log("invalid flag '%s' in line %d",
-                                   flname, lineno);
-                            sts = -1;
-                            break;
-                        }
-                    } /* for */
-                }
-
-                if (sts >= 0) {
-                    grdef->flags = flags;
-                }
-            }
+            grdef->flags = pa_xstrdup(line+6);
+            grdef->flags_lineno = lineno;
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
@@ -1116,19 +1184,35 @@ static int devicedef_parse(int lineno, char *line, struct devicedef *devdef)
             devdef->type = pa_xstrdup(line+5);
         }
         else if (!strncmp(line, "sink=", 5)) {
-            sts = deviceprop_parse(lineno, device_sink, line+5, devdef);
+            devdef->class = device_sink;
+            sts = method_parse(lineno, line+5,
+                               &devdef->method,
+                               &devdef->prop,
+                               &devdef->arg);
         }
         else if (!strncmp(line, "source=", 7)) {
-            sts = deviceprop_parse(lineno, device_source, line+7, devdef);
+            devdef->class = device_source;
+            sts = method_parse(lineno, line+7,
+                               &devdef->method,
+                               &devdef->prop,
+                               &devdef->arg);
         }
         else if (!strncmp(line, "ports=", 6)) {
-            sts = ports_parse(lineno, line+6, devdef);
+            if (strstr(line, DEV_PORT_SEPARATOR))
+                sts = ports_parse_new(lineno, line+6, devdef);
+            else
+                sts = ports_parse_old(lineno, line+6, devdef);
         }
         else if (!strncmp(line, "module=", 7)) {
             sts = module_parse(lineno, line+7, devdef);
         }
+        else if (!strncmp(line, "delay=", 6)) {
+            devdef->delay = pa_xstrdup(line+6);
+            devdef->delay_lineno = lineno;
+        }
         else if (!strncmp(line, "flags=", 6)) {
-            sts = flags_parse(lineno, line+6, section_device, &devdef->flags);
+            devdef->flags = pa_xstrdup(line+6);
+            devdef->flags_lineno = lineno;
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
@@ -1182,13 +1266,16 @@ static int carddef_parse(int lineno, char *line, struct carddef *carddef)
             }
         }
         else if (!strncmp(line, "flags=", 6)) {
-            sts = flags_parse(lineno, line+6, section_card, &carddef->flags[0]);
+            carddef->flags[0] = pa_xstrdup(line+6);
+            carddef->flags_lineno[0] = lineno;
         }
         else if (!strncmp(line, "flags0=", 7)) {
-            sts = flags_parse(lineno, line+7, section_card, &carddef->flags[0]);
+            carddef->flags[0] = pa_xstrdup(line+7);
+            carddef->flags_lineno[0] = lineno;
         }
         else if (!strncmp(line, "flags1=", 7)) {
-            sts = flags_parse(lineno, line+7, section_card, &carddef->flags[1]);
+            carddef->flags[1] = pa_xstrdup(line+7);
+            carddef->flags_lineno[1] = lineno;
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
@@ -1264,7 +1351,8 @@ static int streamdef_parse(int lineno, char *line, struct streamdef *strdef)
             strdef->group = pa_xstrdup(line+6);
         }
         else if (!strncmp(line, "flags=", 6)) {
-            sts = flags_parse(lineno, line+6, section_stream, &strdef->flags);
+            strdef->flags = pa_xstrdup(line+6);
+            strdef->flags_lineno = lineno;
         }
         else if (!strncmp(line, "port_if_active=", 15)) {
             strdef->port = pa_xstrdup(line+15);
@@ -1374,9 +1462,7 @@ static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_
         sts = -1;
     else {
         sts = 0;
-
-        if ((value = strchr(line, '=')) == NULL ||
-             strlen(value) < 2) {
+        if ((value = strchr(line, '=')) == NULL) {
             pa_log("invalid definition '%s' in line %d", line, lineno);
             sts = -1;
         } else {
@@ -1391,53 +1477,68 @@ static int variabledef_parse(int lineno, char *line, char **ret_var, char **ret_
     return sts;
 }
 
-static int deviceprop_parse(int lineno, enum device_class class,
-                            char *propdef, struct devicedef *devdef)
+static int method_parse(int lineno, char *definition,
+                        enum pa_classify_method *method_val,
+                        char **method_prop,
+                        char **method_arg)
 {
     char *colon;
     char *at;
-    char *prop;
-    char *method;
-    char *arg;
+    const char *prop;
+    const char *method;
+    const char *arg;
 
-    if ((colon = strchr(propdef, ':')) == NULL) {
-        pa_log("invalid definition '%s' in line %d", propdef, lineno);
+    pa_assert(definition);
+    pa_assert(method_val);
+    pa_assert(method_prop);
+    pa_assert(method_arg);
+
+    if ((colon = strchr(definition, ':')) == NULL) {
+        pa_log("invalid definition '%s' in line %d", definition, lineno);
         return -1;
     }
 
     *colon = '\0';
     arg    = colon + 1;
 
-    if ((at = strchr(propdef, '@')) == NULL) {
-        prop   = "name";
-        method = propdef;
+    if ((at = strchr(definition, '@')) == NULL) {
+        prop   = "(name)";
+        method = definition;
     }
     else {
         *at    = '\0';
-        prop   = propdef;
+        prop   = definition;
         method = at + 1;
     }
-    
+
     if (!strcmp(method, "equals"))
-        devdef->method = pa_method_equals;
+        *method_val = pa_method_equals;
     else if (!strcmp(method, "startswith"))
-        devdef->method = pa_method_startswith;
+        *method_val = pa_method_startswith;
     else if (!strcmp(method, "matches"))
-        devdef->method = pa_method_matches;
+        *method_val = pa_method_matches;
     else {
         pa_log("invalid method '%s' in line %d", method, lineno);
         return -1;
     }
-    
-    devdef->class = class;
-    devdef->prop  = pa_xstrdup(prop);
-    devdef->arg   = pa_xstrdup(arg);
-    
+
+    *method_prop = pa_xstrdup(prop);
+    *method_arg  = pa_xstrdup(arg);
+
     return 0;
 }
 
-static int ports_parse(int lineno, const char *portsdef,
-                       struct devicedef *devdef)
+static void port_config_entry_free(void *data)
+{
+    struct pa_classify_port_config_entry *port = data;
+    pa_xfree(port->prop);
+    pa_xfree(port->arg);
+    pa_xfree(port->port_name);
+    pa_xfree(port);
+}
+
+static int ports_parse_old(int lineno, const char *portsdef,
+                           struct devicedef *devdef)
 {
     char **entries;
 
@@ -1445,20 +1546,17 @@ static int ports_parse(int lineno, const char *portsdef,
         pa_log("Duplicate ports= line in line %d, using the last "
                "occurrence.", lineno);
 
-        pa_hashmap_free(devdef->ports);
+        pa_idxset_free(devdef->ports, port_config_entry_free);
     }
 
-    devdef->ports = pa_hashmap_new_full(pa_idxset_string_hash_func,
-                                        pa_idxset_string_compare_func,
-                                        NULL,
-                                        (pa_free_cb_t) pa_classify_port_entry_free);
+    devdef->ports = pa_idxset_new(NULL, NULL);
 
     if ((entries = split_strv(portsdef, ","))) {
         char *entry; /* This string has format "sinkname:portname". */
         int i = 0;
 
         while ((entry = entries[i++])) {
-            struct pa_classify_port_entry *port;
+            struct pa_classify_port_config_entry *port;
             size_t entry_len;
             size_t colon_pos;
 
@@ -1484,15 +1582,85 @@ static int ports_parse(int lineno, const char *portsdef,
                 continue;
             }
 
-            port = pa_xnew(struct pa_classify_port_entry, 1);
-            port->device_name = pa_xstrndup(entry, colon_pos);
+            port = pa_xnew0(struct pa_classify_port_config_entry, 1);
+            port->method    = pa_object_name;
+            port->prop      = pa_xstrdup("(name)");
+            port->arg       = pa_xstrndup(entry, colon_pos);
             port->port_name = pa_xstrdup(entry + colon_pos + 1);
 
-            if (pa_hashmap_put(devdef->ports, port->device_name, port) < 0) {
+            if (pa_idxset_put(devdef->ports, port, NULL) < 0) {
                 pa_log("Duplicate device name in port entry '%s' in line %d, "
                        "using the first occurrence", entry, lineno);
+                port_config_entry_free(port);
+            }
+        }
 
-                pa_classify_port_entry_free(port);
+        pa_xstrfreev(entries);
+
+    } else
+        pa_log_warn("Empty ports= definition in line %d", lineno);
+
+    return 0;
+}
+
+static int ports_parse_new(int lineno, const char *portsdef,
+                           struct devicedef *devdef)
+{
+    char **entries;
+
+    if (devdef->ports) {
+        pa_log("Duplicate ports= line in line %d, using the last "
+               "occurrence.", lineno);
+
+        pa_idxset_free(devdef->ports, port_config_entry_free);
+    }
+
+    devdef->ports = pa_idxset_new(NULL, NULL);
+
+    if ((entries = split_strv(portsdef, ","))) {
+        char *entry; /* This string has format "device_definition->portname". */
+        char *arrow;
+        char *port_name;
+        int i = 0;
+
+        while ((entry = entries[i++])) {
+            struct pa_classify_port_config_entry *port;
+
+            if (!*entry) {
+                pa_log_debug("Ignoring a redundant comma in line %d", lineno);
+                continue;
+            }
+
+            arrow = strstr(entry, DEV_PORT_SEPARATOR);
+
+            if (!arrow) {
+                pa_log("Arrow missing in port entry '%s' in line %d, ignoring "
+                       "the entry", entry, lineno);
+                continue;
+            } else if (arrow == entry) {
+                pa_log("Empty device definition in port entry '%s' in line %d, "
+                       "ignoring the entry", entry, lineno);
+                continue;
+            } else if (strlen(arrow) <= DEV_PORT_SEPARATOR_LEN) {
+                pa_log("Empty port name in port entry '%s' in line %d, "
+                       "ignoring the entry", entry, lineno);
+                continue;
+            }
+
+            port_name = arrow + DEV_PORT_SEPARATOR_LEN;
+            arrow[0] = '\0';
+
+            port = pa_xnew0(struct pa_classify_port_config_entry, 1);
+            if (method_parse(lineno, entry, &port->method, &port->prop, &port->arg) == 0) {
+                port->port_name = pa_xstrdup(port_name);
+
+                if (pa_idxset_put(devdef->ports, port, NULL) < 0) {
+                    pa_log("Duplicate device name in port entry '%s' in line %d, "
+                           "using the first occurrence", entry, lineno);
+                    port_config_entry_free(port);
+                }
+            } else {
+                port_config_entry_free(port);
             }
         }
 
@@ -1535,6 +1703,21 @@ static int module_parse(int lineno, const char *portsdef,
         pa_log_warn("Empty module= definition in line %d", lineno);
 
     return 0;
+}
+
+static void delay_parse(struct userdata *u, int lineno,
+                        const char *delaydef, uint32_t *delay)
+{
+    char *end;
+
+    pa_assert(delay);
+
+    if (delaydef && *delaydef != '\0') {
+        pa_policy_var_update(u, delaydef);
+        *delay = strtoul(delaydef, &end, 10);
+        if (*end != '\0')
+            *delay = 0;
+    }
 }
 
 static int streamprop_parse(int lineno,char *propdef,struct streamdef *strdef)
@@ -1948,23 +2131,31 @@ static int cardname_parse(int lineno, char *namedef, struct carddef *carddef, in
     return 0;
 }
 
-static int flags_parse(int lineno, char  *flagdef,
-                       enum section_type  sectn,
-                       uint32_t          *flags_ret)
+static int flags_parse(struct userdata  *u,
+                       int               lineno,
+                       const char       *flagdef,
+                       enum section_type sectn,
+                       uint32_t         *flags_ret)
 {
-    char     *comma;
-    char     *flagname;
-    uint32_t  flags;
-    int       device, card, stream;
+    char       *comma;
+    const char *flagname;
+    uint32_t    flags;
+    int         device, card, stream, group;
 
     flags = 0;
 
-    device = card = stream = false;
+    if (!flagdef)
+        goto done;
+
+    pa_policy_var_update(u, flagdef);
+
+    device = card = stream = group = false;
 
     switch (sectn) {
     case section_device:   device = true;   break;
     case section_card:     card   = true;   break;
     case section_stream:   stream = true;   break;
+    case section_group:    group  = true;   break;
     default:                                break;
     }
 
@@ -1977,26 +2168,51 @@ static int flags_parse(int lineno, char  *flagdef,
             flagdef = comma + 1;
         }
 
+        flagname = pa_policy_var(u, flagname);
+
         if ((device || card) && !strcmp(flagname, "disable_notify"))
             flags |= PA_POLICY_DISABLE_NOTIFY;
+
         else if (device && !strcmp(flagname, "refresh_always"))
             flags |= PA_POLICY_REFRESH_PORT_ALWAYS;
         else if (device && !strcmp(flagname, "delayed_port_change"))
             flags |= PA_POLICY_DELAYED_PORT_CHANGE;
         else if (device && !strcmp(flagname, "module_unload_immediately"))
             flags |= PA_POLICY_MODULE_UNLOAD_IMMEDIATELY;
+
         else if (stream && !strcmp(flagname, "mute_if_active"))
             flags |= PA_POLICY_LOCAL_MUTE;
         else if (stream && !strcmp(flagname, "max_volume"))
             flags |= PA_POLICY_LOCAL_VOLMAX;
+
         else if (card && !strcmp(flagname, "notify_profile_changed"))
             flags |= PA_POLICY_NOTIFY_PROFILE_CHANGED;
-        else {
+
+        else if (group && !strcmp(flagname, "client"))
+            flags = PA_POLICY_GROUP_FLAGS_CLIENT;
+        else if (group && !strcmp(flagname, "nopolicy"))
+            flags = PA_POLICY_GROUP_FLAGS_NOPOLICY;
+        else if (group && !strcmp(flagname, "set_sink"))
+            flags |= PA_POLICY_GROUP_FLAG_SET_SINK;
+        else if (group && !strcmp(flagname, "set_source"))
+            flags |= PA_POLICY_GROUP_FLAG_SET_SOURCE;
+        else if (group && !strcmp(flagname, "route_audio"))
+            flags |= PA_POLICY_GROUP_FLAG_ROUTE_AUDIO;
+        else if (group && !strcmp(flagname, "limit_volume"))
+            flags |= PA_POLICY_GROUP_FLAG_LIMIT_VOLUME;
+        else if (group && !strcmp(flagname, "cork_stream"))
+            flags |= PA_POLICY_GROUP_FLAG_CORK_STREAM;
+        else if (group && !strcmp(flagname, "mute_by_route"))
+            flags |= PA_POLICY_GROUP_FLAG_MUTE_BY_ROUTE;
+        else if (group && !strcmp(flagname, "media_notify"))
+            flags |= PA_POLICY_GROUP_FLAG_MEDIA_NOTIFY;
+        else if (group && !strcmp(flagname, "dynamic_sink"))
+            flags |= PA_POLICY_GROUP_FLAG_DYNAMIC_SINK;
+        else if (strlen(flagname) > 0)
             pa_log("invalid flag '%s' in line %d", flagname, lineno);
-            return -1;
-        }
     }
 
+done:
     *flags_ret = flags;
 
     return 0;
