@@ -1354,8 +1354,13 @@ static int mute_group_by_route(struct userdata        *u,
     sink = mute ? ns->sink : group->sink;
 
     if (sink == NULL) {
-        pa_log("invalid (<null>) target sink for mute-by-route");
-        ret = -1;
+        if ((group->flags & PA_POLICY_GROUP_FLAG_DYNAMIC_SINK) && !mute) {
+            /* dynamic sink based groups may not always have sink */
+        } else {
+            pa_log("invalid (<null>) %s target sink for mute-by-route",
+                   mute ? "nullsink" : "group");
+            ret = -1;
+        }
     }
     else {
         sink_name = pa_sink_ext_get_name(sink);
