@@ -407,6 +407,74 @@ int pa_classify_card(struct userdata *u, struct pa_card *card,
     return cards_classify(cards, card, profs, flag_mask,flag_value, reclassify, result);
 }
 
+int pa_classify_card_all_types(struct userdata *u,
+                               struct pa_classify_result **result)
+{
+    struct pa_classify *classify;
+    struct pa_classify_card *cards;
+    struct pa_classify_card_def  *d;
+
+    pa_assert(u);
+    pa_assert(result);
+    pa_assert_se((classify = u->classify));
+    pa_assert(classify->cards);
+    pa_assert_se((cards = classify->cards));
+
+    *result = classify_result_malloc(cards->ndef);
+
+    for (d = cards->defs;  d->type;  d++) {
+        classify_result_append(result, d->type);
+    }
+
+    return (*result)->count;
+}
+
+static int devices_all_types(struct pa_classify_device *devices,
+                             struct pa_classify_result **result)
+{
+    struct pa_classify_device_def *d;
+
+    pa_assert(devices);
+    pa_assert(result);
+
+    *result = classify_result_malloc(devices->ndef);
+
+    for (d = devices->defs;  d->type;  d++)
+        classify_result_append(result, d->type);
+
+    return (*result)->count;
+}
+
+int pa_classify_sink_all_types(struct userdata *u,
+                               struct pa_classify_result **result)
+{
+    struct pa_classify *classify;
+    struct pa_classify_device *devices;
+
+    pa_assert(u);
+    pa_assert_se((classify = u->classify));
+    pa_assert(classify->sinks);
+    pa_assert_se((devices = classify->sinks));
+    pa_assert(result);
+
+    return devices_all_types(devices, result);
+}
+
+int pa_classify_source_all_types(struct userdata *u,
+                                 struct pa_classify_result **result)
+{
+    struct pa_classify *classify;
+    struct pa_classify_device *devices;
+
+    pa_assert(u);
+    pa_assert_se((classify = u->classify));
+    pa_assert(classify->sources);
+    pa_assert_se((devices = classify->sources));
+    pa_assert(result);
+
+    return devices_all_types(devices, result);
+}
+
 int pa_classify_is_sink_typeof(struct userdata *u, struct pa_sink *sink,
                                const char *type,
                                struct pa_classify_device_data **d)
