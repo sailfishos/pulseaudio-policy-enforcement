@@ -1364,11 +1364,12 @@ static int cards_classify(struct pa_classify_card *cards,
 
     pa_assert(result);
 
-    *result = classify_result_malloc(cards->ndef);
+    /* one card definition may have multiple sets of defines */
+    *result = classify_result_malloc(cards->ndef * PA_POLICY_CARD_MAX_DEFS);
 
     for (d = cards->defs;  d->type;  d++) {
 
-        /* Check for both data[0] and data[1] */
+        /* Check for all definition sets */
 
         for (i = 0; i < PA_POLICY_CARD_MAX_DEFS && d->data[i].profile; i++) {
 
