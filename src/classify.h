@@ -177,6 +177,13 @@ int   pa_classify_source(struct userdata *, struct pa_source *,
 int   pa_classify_card(struct userdata *, struct pa_card *,
                        uint32_t, uint32_t, bool, struct pa_classify_result **result);
 
+int   pa_classify_card_all_types(struct userdata *u,
+                                 struct pa_classify_result **result);
+int   pa_classify_sink_all_types(struct userdata *u,
+                                 struct pa_classify_result **result);
+int   pa_classify_source_all_types(struct userdata *u,
+                                   struct pa_classify_result **result);
+
 int   pa_classify_is_sink_typeof(struct userdata *, struct pa_sink *,
                                  const char *,
                                  struct pa_classify_device_data **);

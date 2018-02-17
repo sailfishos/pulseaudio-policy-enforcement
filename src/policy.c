@@ -32,6 +32,19 @@ void pa_policy_send_device_state_full(struct userdata *u)
     pa_assert(u);
     pa_assert(u->core);
 
+    /* first reset all types to off */
+    pa_classify_card_all_types(u, &r);
+    pa_policy_dbusif_send_device_state(u, PA_POLICY_DISCONNECTED, r);
+    pa_xfree(r);
+
+    pa_classify_sink_all_types(u, &r);
+    pa_policy_dbusif_send_device_state(u, PA_POLICY_DISCONNECTED, r);
+    pa_xfree(r);
+
+    pa_classify_source_all_types(u, &r);
+    pa_policy_dbusif_send_device_state(u, PA_POLICY_DISCONNECTED, r);
+    pa_xfree(r);
+
     /* cards */
     pa_assert_se((idxset = u->core->cards));
     state = NULL;
