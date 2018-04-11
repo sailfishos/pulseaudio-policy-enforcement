@@ -795,7 +795,7 @@ void pa_policy_group_remove_source_output(struct userdata *u, uint32_t idx)
             if ((sl = prev->next) != NULL && idx == sl->index) {
                 group->soutcnt--;
 
-                if (group->num_moving > 0 && !sl->source_output) {
+                if (group->num_moving > 0 && !sl->source_output->source) {
                     pa_log_info("Removing a moving source output %s",
                                 pa_source_output_ext_get_name(sl->source_output));
                     group->num_moving--;
