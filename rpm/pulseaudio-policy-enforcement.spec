@@ -5,7 +5,7 @@
 Name:       pulseaudio-policy-enforcement
 
 Summary:    Pulseaudio module for enforcing policy decisions in the audio domain
-Version:    %{pulsemajorminor}.35
+Version:    %{pulsemajorminor}.36
 Release:    0
 Group:      System/Daemons
 License:    LGPLv2.1
