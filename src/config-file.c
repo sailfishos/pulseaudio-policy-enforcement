@@ -702,11 +702,45 @@ done:
     return ret;
 }
 
-static void section_free(struct section *sec) {
-    struct ctxact      *act;
+static void ctxact_free(struct ctxact *act) {
     struct setprop     *setprop;
     struct delprop     *delprop;
     struct setdef      *setdef;
+
+    switch (act->type) {
+        case pa_policy_set_property:
+            setprop = &act->setprop;
+            pa_xfree(setprop->arg);
+            pa_xfree(setprop->propnam);
+            pa_xfree(setprop->valarg);
+            break;
+
+        case pa_policy_delete_property:
+            delprop = &act->delprop;
+            pa_xfree(delprop->arg);
+            pa_xfree(delprop->propnam);
+            break;
+
+        case pa_policy_set_default:
+            setdef = &act->setdef;
+            pa_xfree(setdef->activity_group);
+            break;
+
+        case pa_policy_override:
+            setprop = &act->setprop;
+            pa_xfree(setprop->arg);
+            pa_xfree(setprop->propnam);
+            pa_xfree(setprop->valarg);
+            break;
+
+        default:
+            pa_assert_not_reached();
+            break;
+    }
+}
+
+static void section_free(struct section *sec) {
+    struct ctxact      *act;
     int                 i;
 
     switch (sec->type) {
@@ -759,35 +793,7 @@ static void section_free(struct section *sec) {
         case section_context:
             for (i = 0; i < sec->def.context->nact; i++) {
                 act = sec->def.context->acts + i;
-                switch (act->type) {
-                    case pa_policy_set_property:
-                        setprop = &act->setprop;
-                        pa_xfree(setprop->arg);
-                        pa_xfree(setprop->propnam);
-                        pa_xfree(setprop->valarg);
-                        break;
-
-                    case pa_policy_delete_property:
-                        delprop = &act->delprop;
-                        pa_xfree(delprop->arg);
-                        pa_xfree(delprop->propnam);
-                        break;
-
-                    case pa_policy_set_default:
-                        setdef = &act->setdef;
-                        pa_xfree(setdef->activity_group);
-                        break;
-
-                    case pa_policy_override:
-                        setprop = &act->setprop;
-                        pa_xfree(setprop->arg);
-                        pa_xfree(setprop->propnam);
-                        pa_xfree(setprop->valarg);
-                        break;
-
-                    default:
-                        break;
-                }
+                ctxact_free(act);
             }
             pa_xfree(sec->def.context->varnam);
             pa_xfree(sec->def.context->arg);
@@ -798,29 +804,11 @@ static void section_free(struct section *sec) {
         case section_activity:
             for (i = 0; i < sec->def.activity->active_nact; i++) {
                 act = sec->def.activity->active_acts + i;
-                switch (act->type) {
-                    case pa_policy_set_property:
-                        setprop = &act->setprop;
-                        pa_xfree(setprop->arg);
-                        pa_xfree(setprop->propnam);
-                        pa_xfree(setprop->valarg);
-                        break;
-                    default:
-                        break;
-                }
+                ctxact_free(act);
             }
             for (i = 0; i < sec->def.activity->inactive_nact; i++) {
                 act = sec->def.activity->inactive_acts + i;
-                switch (act->type) {
-                    case pa_policy_set_property:
-                        setprop = &act->setprop;
-                        pa_xfree(setprop->arg);
-                        pa_xfree(setprop->propnam);
-                        pa_xfree(setprop->valarg);
-                        break;
-                    default:
-                        break;
-                }
+                ctxact_free(act);
             }
             pa_xfree(sec->def.activity->name);
             pa_xfree(sec->def.activity->active_acts);
