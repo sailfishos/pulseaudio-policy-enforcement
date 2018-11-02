@@ -154,6 +154,7 @@ struct streamdef {
     char                    *flags;  /* stream flags */
     int                      flags_lineno;
     char                    *port;   /* port for local routing, if any */
+    char                    *set_property;
 };
 
 
@@ -787,6 +788,7 @@ static void section_free(struct section *sec) {
             pa_xfree(sec->def.stream->exe);
             pa_xfree(sec->def.stream->group);
             pa_xfree(sec->def.stream->port);
+            pa_xfree(sec->def.stream->set_property);
             pa_xfree(sec->def.stream);
             break;
 
@@ -921,7 +923,7 @@ static int section_close(struct userdata *u, struct section *sec)
 
             pa_classify_add_stream(u, strdef->prop,strdef->method,strdef->arg,
                                    strdef->clnam, strdef->sname, strdef->uid, strdef->exe,
-                                   strdef->group, flags, strdef->port);
+                                   strdef->group, flags, strdef->port, strdef->set_property);
 
             break;
 
@@ -1344,6 +1346,9 @@ static int streamdef_parse(int lineno, char *line, struct streamdef *strdef)
         }
         else if (!strncmp(line, "port_if_active=", 15)) {
             strdef->port = pa_xstrdup(line+15);
+        }
+        else if (!strncmp(line, "set-properties=", 15)) {
+            strdef->set_property = pa_xstrdup(line+15);
         }
         else {
             if ((end = strchr(line, '=')) == NULL) {
