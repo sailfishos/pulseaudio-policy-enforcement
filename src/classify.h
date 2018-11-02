@@ -59,6 +59,7 @@ struct pa_classify_stream_def {
     char                          *group; /* policy group name */
     uint32_t                       flags; /* PA_POLICY_LOCAL_ROUTE |
                                              PA_POLICY_LOCAL_MUTE   */
+    pa_proplist                   *properties;
 };
 
 struct pa_classify_stream {
@@ -153,7 +154,7 @@ void  pa_classify_add_card(struct userdata *, char *,
                            uint32_t[PA_POLICY_CARD_MAX_DEFS]);
 void  pa_classify_add_stream(struct userdata *, const char *,enum pa_classify_method,
                              const char *, const char *, const char *, uid_t, const char *, const char *,
-                             uint32_t, const char *);
+                             uint32_t, const char *, const char *);
 void  pa_classify_update_stream_route(struct userdata *u, const char *sname);
 
 void  pa_classify_register_pid(struct userdata *, pid_t, const char *,

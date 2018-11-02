@@ -52,7 +52,8 @@ static struct pa_classify_pid_hash
 static void streams_free(struct pa_classify_stream_def *);
 static void streams_add(struct userdata *u, struct pa_classify_stream_def **, const char *,
                         enum pa_classify_method, const char *, const char *,
-                        const char *, uid_t, const char *, const char *, uint32_t);
+                        const char *, uid_t, const char *, const char *, uint32_t,
+                        const char *);
 static const char *streams_get_group(struct userdata *u, struct pa_classify_stream_def **, pa_proplist *,
                                      const char *, uid_t, const char *, uint32_t *);
 static struct pa_classify_stream_def
@@ -212,7 +213,8 @@ void pa_classify_add_stream(struct userdata *u, const char *prop,
                             enum pa_classify_method method, const char *arg,
                             const char *clnam, const char *sname, uid_t uid,
                             const char *exe, const char *grnam,
-                            uint32_t flags, const char *port)
+                            uint32_t flags, const char *port,
+                            const char *set_properties)
 {
     struct pa_classify     *classify;
     struct pa_policy_group *group;
@@ -228,6 +230,7 @@ void pa_classify_add_stream(struct userdata *u, const char *prop,
     pa_policy_var_update(u, exe);
     pa_policy_var_update(u, grnam);
     pa_policy_var_update(u, port);
+    pa_policy_var_update(u, set_properties);
 
     if (((prop && method && arg) || uid != (uid_t)-1 || exe) && grnam) {
         if (port) {
@@ -242,7 +245,7 @@ void pa_classify_add_stream(struct userdata *u, const char *prop,
         }
 
         streams_add(u, &classify->streams.defs, prop,method,arg,
-                    clnam, sname, uid, exe, grnam, flags);
+                    clnam, sname, uid, exe, grnam, flags, set_properties);
     }
 }
 
@@ -971,6 +974,8 @@ static void streams_free(struct pa_classify_stream_def *defs)
         pa_xfree(stream->clnam);
         pa_xfree(stream->sname);
         pa_xfree(stream->group);
+        if (stream->properties)
+            pa_proplist_free(stream->properties);
 
         pa_xfree(stream);
     }
@@ -978,7 +983,8 @@ static void streams_free(struct pa_classify_stream_def *defs)
 
 static void streams_add(struct userdata *u, struct pa_classify_stream_def **defs, const char *prop,
                         enum pa_classify_method method, const char *arg, const char *clnam,
-                        const char *sname, uid_t uid, const char *exe, const char *group, uint32_t flags)
+                        const char *sname, uid_t uid, const char *exe, const char *group, uint32_t flags,
+                        const char *set_properties)
 {
     struct pa_classify_stream_def *d;
     struct pa_classify_stream_def *prev;
@@ -1015,11 +1021,13 @@ static void streams_add(struct userdata *u, struct pa_classify_stream_def **defs
             method_def = pa_policy_match_def(d->stream_match);
         }
 
-        d->uid   = uid;
-        d->exe   = exe   ? pa_xstrdup(exe)   : NULL;
-        d->clnam = clnam ? pa_xstrdup(clnam) : NULL;
-        d->sname = sname ? pa_xstrdup(sname) : NULL;
-        d->sact  = sname ? 0 : -1;
+        d->uid          = uid;
+        d->exe          = exe   ? pa_xstrdup(exe)   : NULL;
+        d->clnam        = clnam ? pa_xstrdup(clnam) : NULL;
+        d->sname        = sname ? pa_xstrdup(sname) : NULL;
+        d->sact         = sname ? 0 : -1;
+        /* Stream action, identified streams' proplists are merged with what's defined here. */
+        d->properties   = set_properties ? pa_proplist_from_string(set_properties) : NULL;
 
         prev->next = d;
 
@@ -1057,6 +1065,9 @@ static const char *streams_get_group(struct userdata *u,
 
     if (flags_ret != NULL)
         *flags_ret = flags;
+
+    if (d->properties)
+        pa_proplist_update(proplist, PA_UPDATE_REPLACE, d->properties);
 
     return group;
 }
