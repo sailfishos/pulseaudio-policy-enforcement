@@ -1066,7 +1066,7 @@ static const char *streams_get_group(struct userdata *u,
     if (flags_ret != NULL)
         *flags_ret = flags;
 
-    if (d->properties)
+    if (d && d->properties)
         pa_proplist_update(proplist, PA_UPDATE_REPLACE, d->properties);
 
     return group;
