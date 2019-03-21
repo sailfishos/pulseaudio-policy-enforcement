@@ -53,6 +53,11 @@
 #define POLICY_DBUS_STATE_ACT       "active"
 #define POLICY_DBUS_STATE_INACT     "inactive"
 
+#define POLICY_DBUS_CARD            "card_info"
+#define POLICY_DBUS_CARD_PATH       POLICY_DBUS_PDPATH "/" POLICY_DBUS_CARD
+#define POLICY_DBUS_CARD_PROFILE    "profile_changed"
+
+
 #define STRUCT_OFFSET(s,m) ((char *)&(((s *)0)->m) - (char *)0)
 
 #define MAX_ROUTING_DECISIONS 2
@@ -340,6 +345,61 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
 
  fail:
     dbus_message_unref(msg);    /* should cope with NULL msg */
+}
+
+void pa_policy_dbusif_send_card_profile_changed(struct userdata *u, const struct pa_classify_result *list,
+                                                const char *profile)
+{
+    const char              *path = POLICY_DBUS_CARD_PATH;
+
+    struct pa_policy_dbusif *dbusif = u->dbusif;
+    DBusConnection          *conn   = pa_dbus_connection_get(dbusif->conn);
+    const char              *event  = POLICY_DBUS_CARD_PROFILE;
+    DBusMessage             *msg    = NULL;
+    DBusMessageIter          mit;
+    DBusMessageIter          dit;
+    uint32_t                 i;
+    int                      sts;
+
+    if (!list || list->count == 0)
+        return;
+
+    if (!profile)
+        return;
+
+    msg = dbus_message_new_signal(path, dbusif->ifnam, POLICY_DBUS_CARD);
+
+    if (msg == NULL) {
+        pa_log("failed to create new " POLICY_DBUS_CARD " signal");
+        goto done;
+    }
+
+    dbus_message_iter_init_append(msg, &mit);
+
+    if (!dbus_message_iter_append_basic(&mit, DBUS_TYPE_STRING, &event) ||
+        !dbus_message_iter_append_basic(&mit, DBUS_TYPE_STRING, &profile) ||
+        !dbus_message_iter_open_container(&mit, DBUS_TYPE_ARRAY,"s", &dit)) {
+        pa_log("failed to build " POLICY_DBUS_CARD "/" POLICY_DBUS_CARD_PROFILE " signal");
+        goto done;
+    }
+
+    for (i = 0; i < list->count; i++) {
+        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING, &list->types[i])) {
+            pa_log("failed to build " POLICY_DBUS_CARD "/" POLICY_DBUS_CARD_PROFILE " message");
+            goto done;
+        }
+    }
+
+    dbus_message_iter_close_container(&mit, &dit);
+
+    sts = dbus_connection_send(conn, msg, NULL);
+
+    if (!sts)
+        pa_log("Can't send " POLICY_DBUS_CARD " message: out of memory");
+
+ done:
+    if (msg)
+        dbus_message_unref(msg);
 }
 
 void pa_policy_dbusif_send_media_status(struct userdata *u, const char *media,
