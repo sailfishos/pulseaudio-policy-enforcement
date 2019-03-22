@@ -329,8 +329,8 @@ static pa_hook_result_t sink_input_neew(void *hook_data, void *call_data,
                 pa_log_debug("force stream '%s'/'%s' to sink '%s' due to "
                              "mute-by-route", group_name,sinp_name, sink_name);
 
-#ifdef HAVE_OLD_LIBPULSE
-                data->sink = u->nullsink->sink;
+#if PULSEAUDIO_VERSION >= 12
+                pa_sink_input_new_data_set_sink(data, u->nullsink->sink, false, false);
 #else
                 pa_sink_input_new_data_set_sink(data, u->nullsink->sink, false);
 #endif
@@ -341,8 +341,8 @@ static pa_hook_result_t sink_input_neew(void *hook_data, void *call_data,
                 pa_log_debug("force stream '%s'/'%s' to sink '%s'",
                              group_name, sinp_name, sink_name); 
 
-#ifdef HAVE_OLD_LIBPULSE
-                data->sink = group->sink;
+#if PULSEAUDIO_VERSION >= 12
+                pa_sink_input_new_data_set_sink(data, group->sink, false, false);
 #else
                 pa_sink_input_new_data_set_sink(data, group->sink, false);
 #endif

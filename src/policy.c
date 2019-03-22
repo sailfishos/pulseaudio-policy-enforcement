@@ -20,6 +20,16 @@ void pa_policy_send_device_state(struct userdata *u, const char *state,
     pa_policy_dbusif_send_device_state(u, state, list);
 }
 
+void pa_policy_send_card_state(struct userdata *u, const struct pa_classify_result *list,
+                               const char *profile)
+{
+    pa_assert(u);
+    pa_assert(profile);
+    pa_assert(list);
+
+    pa_policy_dbusif_send_card_profile_changed(u, list, profile);
+}
+
 void pa_policy_send_device_state_full(struct userdata *u)
 {
     void             *state = NULL;

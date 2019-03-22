@@ -12,6 +12,7 @@
 #include <pulsecore/strbuf.h>
 #include <pulsecore/core.h>
 #include <pulsecore/hook-list.h>
+#include <pulsecore/core-error.h>
 #include <pulse/timeval.h>
 
 #include "classify.h"
@@ -586,6 +587,16 @@ static int classify_update_module_load(struct userdata *u,
                                               devdata->module,
                                               devdata->module_args ? devdata->module_args : "");
 
+#if PULSEAUDIO_VERSION >= 12
+    int r;
+    if ((r = pa_module_load(&m->module,
+                            u->core,
+                            devdata->module,
+                            devdata->module_args)) < 0) {
+        pa_log("Failed to load %s: %s (%d)", devdata->module, pa_cstrerror(r), -r);
+        return -1;
+    }
+#else
     m->module = pa_module_load(u->core,
                                devdata->module,
                                devdata->module_args);
@@ -593,6 +604,7 @@ static int classify_update_module_load(struct userdata *u,
         pa_log("Failed to load %s", devdata->module);
         return -1;
     }
+#endif
 
     m->module_name = devdata->module;
     m->module_args = devdata->module_args;

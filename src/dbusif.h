@@ -15,6 +15,9 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
 void pa_policy_dbusif_send_media_status(struct userdata *, const char *,
                                         const char *, int);
 
+void pa_policy_dbusif_send_card_profile_changed(struct userdata *u,
+                                                const struct pa_classify_result *list,
+                                                const char *profile);
 
 #endif
 
