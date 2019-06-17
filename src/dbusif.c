@@ -27,6 +27,7 @@
 #define ADMIN_DBUS_INTERFACE        "org.freedesktop.DBus"
 
 #define ADMIN_NAME_OWNER_CHANGED    "NameOwnerChanged"
+#define ADMIN_GET_NAME_OWNER        "GetNameOwner"
 
 #define POLICY_DBUS_INTERFACE       "com.nokia.policy"
 #define POLICY_DBUS_MYPATH          "/com/nokia/policy/enforce/pulseaudio"
@@ -71,6 +72,7 @@ struct routing_decision {      /* temporary storage for routing decision informa
 
 struct pa_policy_dbusif {
     pa_dbus_connection *conn;
+    DBusPendingCall    *pending_pdp_state;
     DBusPendingCall    *pending_pdp_registration;
     char               *ifnam;   /* signal interface */
     char               *mypath;  /* my signal path */
@@ -79,8 +81,7 @@ struct pa_policy_dbusif {
     char               *admrule; /* match rule to catch name changes */
     char               *actrule; /* match rule to catch action signals */
     char               *strrule; /* match rule to catch stream info signals */
-    int                 regist;  /* wheter or not registered to policy daemon*/
-    int                 re_regist;
+    bool                regist;  /* wheter or not registered to policy daemon*/
     bool                route_sources_first;
 };
 
@@ -133,8 +134,12 @@ static DBusHandlerResult filter(DBusConnection *, DBusMessage *, void *);
 static void handle_admin_message(struct userdata *, DBusMessage *);
 static void handle_info_message(struct userdata *, DBusMessage *);
 static void handle_action_message(struct userdata *, DBusMessage *);
+static void getnameowner_cb(DBusPendingCall *, void *);
+static void pdp_get_state(struct pa_policy_dbusif *, struct userdata *);
+static void pdp_get_state_cancel(struct pa_policy_dbusif *);
 static void registration_cb(DBusPendingCall *, void *);
-static int  register_to_pdp(struct pa_policy_dbusif *, struct userdata *);
+static int  pdp_register_ep(struct pa_policy_dbusif *, struct userdata *);
+static void pdp_register_ep_cancel(struct pa_policy_dbusif *);
 static int  signal_status(struct userdata *, uint32_t, uint32_t);
 static void pa_policy_free_dbusif(struct pa_policy_dbusif *,struct userdata *);
 
@@ -154,7 +159,7 @@ struct pa_policy_dbusif *pa_policy_dbusif_init(struct userdata *u,
     char                     actrule[512];
     char                     strrule[512];
     char                     admrule[512];
-    
+
     dbusif = pa_xnew0(struct pa_policy_dbusif, 1);
 
     dbusif->route_sources_first = route_sources_first;
@@ -241,7 +246,7 @@ struct pa_policy_dbusif *pa_policy_dbusif_init(struct userdata *u,
     dbusif->actrule = pa_xstrdup(actrule);
     dbusif->strrule = pa_xstrdup(strrule);
 
-    register_to_pdp(dbusif, u);
+    pdp_get_state(dbusif, u);
 
     return dbusif;
 
@@ -259,13 +264,8 @@ static void pa_policy_free_dbusif(struct pa_policy_dbusif *dbusif,
     if (!dbusif)
         return;
 
-    if (dbusif->pending_pdp_registration) {
-        pa_log_debug("While freeing dbusif, the policy decision point "
-                     "registration seems to be still pending. Canceling "
-                     "the pending call.");
-        dbus_pending_call_cancel(dbusif->pending_pdp_registration);
-        dbus_pending_call_unref(dbusif->pending_pdp_registration);
-    }
+    pdp_get_state_cancel(dbusif);
+    pdp_register_ep_cancel(dbusif);
 
     if (dbusif->conn) {
         dbusconn = pa_dbus_connection_get(dbusif->conn);
@@ -310,6 +310,9 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
     uint32_t                 i;
     int                      sts;
 
+    if (!dbusif->regist)
+        return;
+
     if (!list || list->count == 0)
         return;
 
@@ -344,7 +347,8 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
     }
 
  fail:
-    dbus_message_unref(msg);    /* should cope with NULL msg */
+    if (msg)
+        dbus_message_unref(msg);
 }
 
 void pa_policy_dbusif_send_card_profile_changed(struct userdata *u, const struct pa_classify_result *list,
@@ -360,6 +364,9 @@ void pa_policy_dbusif_send_card_profile_changed(struct userdata *u, const struct
     DBusMessageIter          dit;
     uint32_t                 i;
     int                      sts;
+
+    if (!dbusif->regist)
+        return;
 
     if (!list || list->count == 0)
         return;
@@ -492,19 +499,20 @@ static void handle_admin_message(struct userdata *u, DBusMessage *msg)
         return;
     }
 
-    if (after && strcmp(after, "")) {
+    if (after && *after) {
         pa_log_debug("policy decision point is up");
+        pdp_get_state_cancel(dbusif);
+        pdp_register_ep_cancel(dbusif);
 
-        if (!dbusif->regist) {
-            dbusif->re_regist = 1;
-            register_to_pdp(dbusif, u);
-        }
+        if (!dbusif->regist)
+            pdp_register_ep(dbusif, u);
     }
 
-
-    if (name && before && (!after || !strcmp(after, ""))) {
+    if (name && before && (!after || !*after)) {
         pa_log_info("policy decision point is gone");
-        dbusif->regist = 0;
+        dbusif->regist = false;
+        pdp_get_state_cancel(dbusif);
+        pdp_register_ep_cancel(dbusif);
     } 
 }
 
@@ -1032,12 +1040,98 @@ static int context_parser(struct userdata *u, DBusMessageIter *actit)
     return true;
 }
 
+static void getnameowner_cb(DBusPendingCall *pend, void *data)
+{
+    struct userdata         *u = data;
+    DBusMessage             *reply;
+    DBusError                error;
+
+    pa_assert(u);
+    pa_assert(u->dbusif);
+    pa_assert(pend == u->dbusif->pending_pdp_state);
+
+    reply = dbus_pending_call_steal_reply(pend);
+    if (!reply) {
+        pa_log("getting pdp state failed: invalid argument");
+        return;
+    }
+
+    dbus_error_init(&error);
+
+    if (dbus_set_error_from_message(&error, reply)) {
+        pa_log_info("failed to get pdp state: %s (%s)",
+                    error.name,
+                    error.message ? error.message : "");
+        dbus_error_free(&error);
+    } else {
+        pa_log_info("pdp is available");
+        if (!u->dbusif->regist)
+            pdp_register_ep(u->dbusif, u);
+    }
+
+    dbus_message_unref(reply);
+    dbus_pending_call_unref(pend);
+    u->dbusif->pending_pdp_state = NULL;
+}
+
+static void pdp_get_state(struct pa_policy_dbusif *dbusif, struct userdata *u)
+{
+    int              success = 0;
+    DBusConnection  *conn    = pa_dbus_connection_get(dbusif->conn);
+    DBusMessage     *msg     = NULL;
+    DBusPendingCall *pend;
+
+    msg = dbus_message_new_method_call(ADMIN_DBUS_MANAGER,
+                                       ADMIN_DBUS_PATH,
+                                       ADMIN_DBUS_INTERFACE,
+                                       ADMIN_GET_NAME_OWNER);
+
+    if (!msg) {
+        pa_log("Failed to create D-Bus message to get pdp state");
+        goto done;
+    }
+
+    if (!(success = dbus_message_append_args(msg,
+                                             DBUS_TYPE_STRING, &dbusif->pdnam,
+                                             DBUS_TYPE_INVALID))) {
+        pa_log("Failed to build D-Bus message to get pdp state");
+        goto done;
+    }
+
+    if (!(success = dbus_connection_send_with_reply(conn, msg, &pend, DBUS_TIMEOUT_USE_DEFAULT))) {
+        pa_log("Failed to send message to get pdp state");
+        goto done;
+    }
+
+    dbusif->pending_pdp_state = pend;
+
+    if (!(success = dbus_pending_call_set_notify(pend, getnameowner_cb, u, NULL)))
+        pa_log("Can't set notification for pdp state reply");
+
+ done:
+    if (msg)
+        dbus_message_unref(msg);
+    if (success)
+        pa_log_debug("query initial pdp availability");
+}
+
+static void pdp_get_state_cancel(struct pa_policy_dbusif *dbusif)
+{
+    pa_assert(dbusif);
+
+    if (dbusif->pending_pdp_state) {
+        pa_log_debug("Canceling pending pdp state call.");
+        dbus_pending_call_cancel(dbusif->pending_pdp_state);
+        dbus_pending_call_unref(dbusif->pending_pdp_state);
+        dbusif->pending_pdp_state = NULL;
+    }
+}
+
 static void registration_cb(DBusPendingCall *pend, void *data)
 {
     struct userdata *u = (struct userdata *)data;
     DBusMessage     *reply;
-    const char      *error_descr;
-    int              success;
+    DBusError        error;
 
     pa_assert(u);
     pa_assert(u->dbusif);
@@ -1049,28 +1143,19 @@ static void registration_cb(DBusPendingCall *pend, void *data)
         return;
     }
 
-    if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
-        success = dbus_message_get_args(reply, NULL,
-                                        DBUS_TYPE_STRING, &error_descr,
-                                        DBUS_TYPE_INVALID);
+    dbus_error_init(&error);
 
-        if (!success)
-            error_descr = dbus_message_get_error_name(reply);
-
-        pa_log_info("registration to policy decision point failed: %s",
-                    error_descr);
-    }
-    else {
+    if (dbus_set_error_from_message(&error, reply)) {
+        pa_log_info("registration to policy decision point failed: %s (%s)",
+                    error.name,
+                    error.message ? error.message : "");
+        dbus_error_free(&error);
+    } else {
         pa_log_info("got reply to registration");
 
-        if (u->dbusif) {
-            u->dbusif->regist = 1;
-
-            if (u->dbusif->re_regist) {
-                pa_log_info("re-send device state infos to policy decision point");
-                pa_policy_send_device_state_full(u);
-            }
-        }
+        u->dbusif->regist = true;
+        pa_log_info("Send state infos to policy decision point.");
+        pa_policy_send_device_state_full(u);
     }
 
     dbus_message_unref(reply);
@@ -1078,19 +1163,22 @@ static void registration_cb(DBusPendingCall *pend, void *data)
     u->dbusif->pending_pdp_registration = NULL;
 }
 
-static int register_to_pdp(struct pa_policy_dbusif *dbusif, struct userdata *u)
+static int pdp_register_ep(struct pa_policy_dbusif *dbusif, struct userdata *u)
 {
     static const char *name = "pulseaudio";
 
-    DBusConnection  *conn   = pa_dbus_connection_get(dbusif->conn);
-    DBusMessage     *msg;
-    DBusPendingCall *pend;
+    int              success    = true;
+    DBusConnection  *conn       = pa_dbus_connection_get(dbusif->conn);
+    DBusMessage     *msg        = NULL;
+    DBusPendingCall *pend       = NULL;
     const char      *signals[4];
     const char     **v_ARRAY;
     int              i;
-    int              success;
 
-    pa_assert(!dbusif->pending_pdp_registration);
+    pa_assert(!dbusif->regist);
+
+    if (dbusif->pending_pdp_registration)
+        goto done;
 
     pa_log_info("registering to policy daemon: name='%s' path='%s' if='%s'",
                 dbusif->pdnam, dbusif->pdpath, dbusif->ifnam);
@@ -1098,10 +1186,10 @@ static int register_to_pdp(struct pa_policy_dbusif *dbusif, struct userdata *u)
     msg = dbus_message_new_method_call(dbusif->pdnam, dbusif->pdpath,
                                        dbusif->ifnam, "register");
 
-    if (msg == NULL) {
+    if (!msg) {
         pa_log("Failed to create D-Bus message to register");
         success = false;
-        goto failed;
+        goto done;
     }
 
     signals[i=0] = POLICY_ACTIONS;
@@ -1114,14 +1202,14 @@ static int register_to_pdp(struct pa_policy_dbusif *dbusif, struct userdata *u)
                                        DBUS_TYPE_INVALID);
     if (!success) {
         pa_log("Failed to build D-Bus message to register");
-        goto failed;
+        goto done;
     }
 
 
     success = dbus_connection_send_with_reply(conn, msg, &pend, 10000);
     if (!success) {
         pa_log("Failed to register");
-        goto failed;
+        goto done;
     }
 
     dbusif->pending_pdp_registration = pend;
@@ -1129,14 +1217,26 @@ static int register_to_pdp(struct pa_policy_dbusif *dbusif, struct userdata *u)
     success = dbus_pending_call_set_notify(pend, registration_cb, u, NULL);
 
     if (!success) {
-        pa_log("Can't set notification for registartion");
+        pa_log("Can't set notification for registration");
     }
 
- failed:
-    dbus_message_unref(msg);
+ done:
+    if (msg)
+        dbus_message_unref(msg);
     return success;
 }
 
+static void pdp_register_ep_cancel(struct pa_policy_dbusif *dbusif)
+{
+    pa_assert(dbusif);
+
+    if (dbusif->pending_pdp_registration) {
+        pa_log_debug("Canceling pending pdp registration call.");
+        dbus_pending_call_cancel(dbusif->pending_pdp_registration);
+        dbus_pending_call_unref(dbusif->pending_pdp_registration);
+        dbusif->pending_pdp_registration = NULL;
+    }
+}
 
 static int signal_status(struct userdata *u, uint32_t txid, uint32_t status)
 {
@@ -1190,7 +1290,8 @@ static int signal_status(struct userdata *u, uint32_t txid, uint32_t status)
     return 0;
 
  fail:
-    dbus_message_unref(msg);    /* should cope with NULL msg */
+    if (msg)
+        dbus_message_unref(msg);
 
     return -1;
 }
