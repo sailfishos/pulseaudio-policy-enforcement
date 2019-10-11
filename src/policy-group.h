@@ -57,6 +57,7 @@ struct pa_policy_group {
     int                           locmute;  /* mute by local policy */
     int                           corked;
     int                           mutebyrt_sink;    /* muted by routing to null sink */
+    int                           mutebyrt_source;  /* muted by routing to null source */
     struct pa_sink_input_list    *sinpls;   /* sink input list */
     struct pa_source_output_list *soutls;   /* source output list */
     int                           sinpcnt;  /* sink input counter */

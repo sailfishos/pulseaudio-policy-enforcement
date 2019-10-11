@@ -48,8 +48,7 @@ static pa_volume_t       dbtbl[300];
 static int move_group(struct pa_policy_group *, struct target *);
 static int volset_group(struct userdata *, struct pa_policy_group *,
                         pa_volume_t);
-static int mute_group_by_route(struct userdata *u, struct pa_policy_group *,
-                               int, struct pa_null_sink *);
+static int mute_group_by_route(struct userdata *u, struct pa_policy_group *, int);
 static int mute_group_locally(struct userdata *, struct pa_policy_group *,int);
 static int cork_group(struct userdata *u, struct pa_policy_group *, int);
 
@@ -723,6 +722,7 @@ void pa_policy_group_insert_source_output(struct userdata         *u,
     struct pa_policy_groupset    *gset;
     struct pa_policy_group       *group;
     struct pa_source_output_list *sl;
+    struct pa_null_source        *ns;
     const char                   *sout_name;
     const char                   *src_name;
 
@@ -745,8 +745,15 @@ void pa_policy_group_insert_source_output(struct userdata         *u,
         sl->source_output = so;
 
         group->soutls = sl;
+        ns = u->nullsource;
 
-        if (group->source != NULL) {
+        if (group->mutebyrt_source && ns->source) {
+
+            pa_log_debug("move source output '%s' to source '%s'",
+                         sout_name, ns->name);
+
+            pa_source_output_move_to(so, ns->source, true);
+        } else if (group->source != NULL) {
             sout_name = pa_source_output_ext_get_name(so);
             src_name  = pa_source_ext_get_name(group->source);
 
@@ -1036,8 +1043,8 @@ int pa_policy_group_volume_limit(struct userdata *u, const char *name,
                     ret = volset_group(u, group, percent);
                 else {
                     mute = percent > 0 ? false : true;
-                    ret  = mute_group_by_route(u, group, mute, ns);
-                    
+                    ret  = mute_group_by_route(u, group, mute);
+
                     if (!mute)
                         volset_group(u, group, percent);
                 }
@@ -1342,16 +1349,20 @@ pa_sink *pa_policy_group_find_sink(struct userdata *u, struct pa_policy_group *g
 
 static int mute_group_by_route(struct userdata        *u,
                                struct pa_policy_group *group,
-                               int                     mute,
-                               struct pa_null_sink    *ns)
+                               int                     mute)
 {
     struct pa_sink_input_list *sl;
     struct pa_sink_input *sinp;
     struct pa_sink *sink;
     const char *sink_name;
+    struct pa_source_output_list *soutls;
+    struct pa_source_output *sout;
+    struct pa_source *source;
+    const char *source_name;
     int ret = 0;
 
-    sink = mute ? ns->sink : group->sink;
+    sink = mute ? u->nullsink->sink : group->sink;
+    source = mute ? u->nullsource->source : group->source;
 
     if (sink == NULL) {
         if ((group->flags & PA_POLICY_GROUP_FLAG_DYNAMIC_SINK) && !mute) {
@@ -1386,6 +1397,36 @@ static int mute_group_by_route(struct userdata        *u,
                                  pa_sink_input_ext_get_name(sinp), sink_name);
 
                     if (pa_sink_input_move_to(sinp, sink, true) < 0)
+                        ret = -1;
+                }
+            }
+        }
+    }
+
+    if (source) {
+        source_name = pa_source_ext_get_name(source);
+
+        if ((mute && group->mutebyrt_source) || (!mute && !group->mutebyrt_source)) {
+            pa_log_debug("group '%s' is already routed to source '%s' by "
+                         "mute-by-route (mute is %s)", group->name, source_name,
+                         group->mutebyrt_source ? "on" : "off");
+        }
+        else {
+            pa_log_debug("group '%s' is routed to source '%s' due to "
+                         "mute-by-route muting is %s", group->name, source_name,
+                         mute ? "on" : "off");
+
+            group->mutebyrt_source = mute;
+
+            if (!group->locmute) {
+                for (soutls = group->soutls;   soutls != NULL;   soutls = soutls->next) {
+                    sout = soutls->source_output;
+
+                    pa_log_debug("move source output '%s' to source '%s' by "
+                                 "mute-by-route",
+                                 pa_source_output_ext_get_name(sout), source_name);
+
+                    if (pa_source_output_move_to(sout, source, true) < 0)
                         ret = -1;
                 }
             }
