@@ -959,13 +959,29 @@ static int start_move_group(struct pa_policy_group *group)
 
 void pa_policy_group_assert_moving(struct userdata *u)
 {
-    struct pa_policy_group *group = NULL;
-    struct cursor           cursor = { .idx = 0, .grp = NULL, };
+    struct pa_sink_input_list      *sil;
+    struct pa_source_output_list   *sol;
+    struct pa_policy_group         *group = NULL;
+    struct cursor                   cursor = { .idx = 0, .grp = NULL, };
 
     while ((group = group_scan(u->groups, &cursor)) != NULL) {
-        if (group->num_moving > 0)
+        /* Test that the group has no moving streams */
+        if (group->num_moving > 0) {
             pa_log_error("Group %s still has %d moving streams",
                          group->name, group->num_moving);
+
+            for (sil = group->sinpls; sil; sil = sil->next) {
+                if (!sil->sink_input->sink)
+                    pa_log_error("Sink input %s still moving",
+                                 pa_sink_input_ext_get_name(sil->sink_input));
+            }
+
+            for (sol = group->soutls; sol; sol = sol->next) {
+                if (!sol->source_output->source)
+                    pa_log_error("Source output %s still moving",
+                                 pa_source_output_ext_get_name(sol->source_output));
+            }
+        }
     }
 }
 
@@ -1157,10 +1173,6 @@ static int move_group(struct pa_policy_group *group, struct target *target)
             }
         }
 
-        /*
-         * Ideally, group->num_moving == 0 at this point,
-         * but maybe > 0 if errors occurred
-         */
         pa_assert(group->num_moving >= 0);
 
         break;
@@ -1218,35 +1230,13 @@ static int move_group(struct pa_policy_group *group, struct target *target)
             }
         }
 
-        /*
-         * Ideally, group->num_moving == 0 at this point,
-         * but maybe > 0 if errors occurred
-         */
         pa_assert(group->num_moving >= 0);
-
         break;
 
     default:
         ret = -1;
         break;
     } /* switch class */
-
-    /* Test that the group has no moving streams */
-    if (group->num_moving) {
-        pa_log_error("Group %s still has %d streams moving",
-                     group->name, group->num_moving);
-        for (sil = group->sinpls; sil; sil = sil->next) {
-            if (!sil->sink_input->sink)
-                pa_log_error("Sink input %s still moving",
-                             pa_sink_input_ext_get_name(sil->sink_input));
-        }
-        for (sol = group->soutls; sol; sol = sol->next) {
-            if (!sol->source_output->source)
-                pa_log_error("Source output %s still moving",
-                             pa_source_output_ext_get_name(sol->source_output));
-        }
-        ret = -1;
-    }
 
     return ret;
 }
