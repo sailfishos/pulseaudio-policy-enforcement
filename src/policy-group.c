@@ -1105,6 +1105,7 @@ static int move_group(struct pa_policy_group *group, struct target *target)
     struct pa_sink_input         *sinp;
     struct pa_source_output      *sout;
     const char                   *sinkname;
+    const char                   *sourcename;
     int                           ret = 0;
 
     if (!group || !target->any)
@@ -1112,9 +1113,8 @@ static int move_group(struct pa_policy_group *group, struct target *target)
 
     switch (target->class) {
     case pa_policy_route_to_sink:
-        sink = target->sink;
-
         /* move sink inputs to the sink */
+        sink = target->sink;
         sinkname = pa_sink_ext_get_name(sink);
 
         if (sink == group->sink && group->num_moving == 0) {
@@ -1174,42 +1174,45 @@ static int move_group(struct pa_policy_group *group, struct target *target)
         }
 
         pa_assert(group->num_moving >= 0);
-
         break;
 
     case pa_policy_route_to_source:
-        source = target->source;
-
         /* move source outputs to the source */
         source = target->source;
+        sourcename = pa_source_ext_get_name(source);
+
         if (source == group->source && group->num_moving == 0) {
-            pa_log_debug("group '%s' is aready routed to source '%s'",
-                         group->name, pa_source_ext_get_name(source));
+            if (!group->mutebyrt_source) {
+                pa_log_debug("group '%s' is aready routed to source '%s'",
+                             group->name, pa_source_ext_get_name(source));
+            }
         } else {
             group->source = source;
 
-            for (sol = group->soutls; sol; sol = sol->next) {
-                sout = sol->source_output;
+            if (!group->mutebyrt_source) {
+                for (sol = group->soutls; sol; sol = sol->next) {
+                    sout = sol->source_output;
 
-                pa_log_debug("move source output '%s' to source '%s'",
-                             pa_source_output_ext_get_name(sout),
-                             pa_source_ext_get_name(source));
+                    pa_log_debug("move source output '%s' to source '%s'",
+                                 pa_source_output_ext_get_name(sout),
+                                 pa_source_ext_get_name(source));
 
-                if (!sout->source) {
-                    pa_assert(group->num_moving > 0);
-                    if (pa_source_output_finish_move(sout, source, true) >= 0)
-                        group->num_moving--;
-                    else {
+                    if (!sout->source) {
+                        pa_assert(group->num_moving > 0);
+                        if (pa_source_output_finish_move(sout, source, true) >= 0)
+                            group->num_moving--;
+                        else {
+                            ret = -1;
+                            pa_log_error("Failed to finish moving %s to %s",
+                                         pa_source_output_ext_get_name(sout),
+                                         pa_source_ext_get_name(source));
+                        }
+                    } else if (pa_source_output_move_to(sout, source, true) < 0) {
                         ret = -1;
-                        pa_log_error("Failed to finish moving %s to %s",
+                        pa_log_error("Failed to move %s to %s",
                                      pa_source_output_ext_get_name(sout),
                                      pa_source_ext_get_name(source));
                     }
-                } else if (pa_source_output_move_to(sout, source, true) < 0) {
-                    ret = -1;
-                    pa_log_error("Failed to move %s to %s",
-                                 pa_source_output_ext_get_name(sout),
-                                 pa_source_ext_get_name(source));
                 }
             }
         }
