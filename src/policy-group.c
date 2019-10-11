@@ -599,7 +599,7 @@ void pa_policy_group_insert_sink_input(struct userdata      *u,
             local_route = flags & PA_POLICY_LOCAL_ROUTE;
             local_mute  = flags & PA_POLICY_LOCAL_MUTE;
 
-            if (group->mutebyrt & !local_route) {
+            if (group->mutebyrt_sink & !local_route) {
                 ns = u->nullsink;
 
                 pa_log_debug("move sink input '%s' to sink '%s'",
@@ -1095,7 +1095,7 @@ static int move_group(struct pa_policy_group *group, struct target *target)
         sinkname = pa_sink_ext_get_name(sink);
 
         if (sink == group->sink && group->num_moving == 0) {
-            if (!group->mutebyrt) {
+            if (!group->mutebyrt_sink) {
                 pa_log_debug("group '%s' is aready routed to sink '%s'",
                              group->name, sinkname);
             }
@@ -1105,7 +1105,7 @@ static int move_group(struct pa_policy_group *group, struct target *target)
             group->sink = sink;
             group->sinkidx = sink->index;
 
-            if (!group->mutebyrt) {
+            if (!group->mutebyrt_sink) {
                 for (sil = group->sinpls; sil; sil = sil->next) {
                     sinp = sil->sink_input;
 
@@ -1365,26 +1365,26 @@ static int mute_group_by_route(struct userdata        *u,
     else {
         sink_name = pa_sink_ext_get_name(sink);
 
-        if ((mute && group->mutebyrt) || (!mute && !group->mutebyrt)) {
-            pa_log_debug("group '%s' is already routed to '%s' by "
+        if ((mute && group->mutebyrt_sink) || (!mute && !group->mutebyrt_sink)) {
+            pa_log_debug("group '%s' is already routed to sink '%s' by "
                          "mute-by-route (mute is %s)", group->name, sink_name,
-                         group->mutebyrt ? "on" : "off");
+                         group->mutebyrt_sink ? "on" : "off");
         }
         else {
-            pa_log_debug("group '%s' is routed to '%s' due to "
+            pa_log_debug("group '%s' is routed to sink '%s' due to "
                          "mute-by-route muting is %s", group->name, sink_name,
                          mute ? "on" : "off");
 
-            group->mutebyrt = mute;
+            group->mutebyrt_sink = mute;
 
             if (!group->locmute) {
                 for (sl = group->sinpls;   sl != NULL;   sl = sl->next) {
                     sinp = sl->sink_input;
-                    
+
                     pa_log_debug("move sink input '%s' to sink '%s' by "
                                  "mute-by-route",
                                  pa_sink_input_ext_get_name(sinp), sink_name);
-                    
+
                     if (pa_sink_input_move_to(sinp, sink, true) < 0)
                         ret = -1;
                 }

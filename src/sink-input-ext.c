@@ -323,7 +323,7 @@ static pa_hook_result_t sink_input_neew(void *hook_data, void *call_data,
             local_route  = flags & PA_POLICY_LOCAL_ROUTE;
             local_volume = flags & PA_POLICY_LOCAL_VOLMAX;
 
-            if (group->mutebyrt && !local_route) {
+            if (group->mutebyrt_sink && !local_route) {
                 sink_name = u->nullsink->name;
 
                 pa_log_debug("force stream '%s'/'%s' to sink '%s' due to "
@@ -700,7 +700,7 @@ static void handle_sink_input_fixate(struct userdata *u,
 
     /* Set volume factor in sink_input_fixate() so that we have our target sink and
      * channel_map defined properly. */
-    if (group_volume && !group->mutebyrt &&
+    if (group_volume && !group->mutebyrt_sink &&
              group->limit > 0 && group->limit < PA_VOLUME_NORM)
     {
         pa_log_debug("set stream '%s'/'%s' volume factor to %d",
