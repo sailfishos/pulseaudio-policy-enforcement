@@ -35,6 +35,7 @@ struct userdata {
     pa_core                   *core;
     pa_module                 *module;
     struct pa_null_sink       *nullsink;
+    struct pa_null_source     *nullsource;
     struct pa_index_hash      *hsnk;     /* sink index hash */
     struct pa_index_hash      *hsi;      /* sink input index hash */
     struct pa_client_evsubscr *scl;      /* client event susbscription */
