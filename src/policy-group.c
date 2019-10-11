@@ -935,9 +935,9 @@ static int start_move_group(struct pa_policy_group *group)
             pa_log_error("Sink input %s already detached",
                     pa_sink_input_ext_get_name(input->sink_input));
         else {
-            pa_assert_se(pa_sink_input_start_move(input->sink_input) >= 0);
             pa_log_debug("Starting to move sink input %s",
                     pa_sink_input_ext_get_name(input->sink_input));
+            pa_assert_se(pa_sink_input_start_move(input->sink_input) >= 0);
             group->num_moving++;
         }
     }
@@ -947,9 +947,9 @@ static int start_move_group(struct pa_policy_group *group)
             pa_log_error("Source output %s already detached",
                     pa_source_output_ext_get_name(output->source_output));
         else {
-            pa_assert_se(pa_source_output_start_move(output->source_output) >= 0);
             pa_log_debug("Starting to move source output %s",
                     pa_source_output_ext_get_name(output->source_output));
+            pa_assert_se(pa_source_output_start_move(output->source_output) >= 0);
             group->num_moving++;
         }
     }
