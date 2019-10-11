@@ -1140,18 +1140,19 @@ static int move_group(struct pa_policy_group *group, struct target *target)
             }
         }
 
-        for (sol = group->soutls; sol; sol = sol->next) {
-            sout = sol->source_output;
-            if (!sout->source) {
+        for (sil = group->sinpls; sil; sil = sil->next) {
+            sinp = sil->sink_input;
+            if (!sinp->sink) {
                 pa_log_debug("Re-attaching %s to %s",
-                             pa_source_output_ext_get_name(sout),
-                             pa_source_ext_get_name(group->source));
-                if (pa_source_output_finish_move(sout, group->source, true) < 0) {
+                             pa_sink_input_ext_get_name(sinp),
+                             pa_sink_ext_get_name(group->sink));
+                if (pa_sink_input_finish_move(sinp, group->sink, true) < 0) {
                     ret = -1;
                     pa_log_error("Failed to re-attach %s to %s",
-                                 pa_source_output_ext_get_name(sout),
-                                 pa_source_ext_get_name(group->source));
-                } else
+                                 pa_sink_input_ext_get_name(sinp),
+                                 pa_sink_ext_get_name(group->sink));
+                }
+                else
                     group->num_moving--;
             }
         }
@@ -1201,19 +1202,18 @@ static int move_group(struct pa_policy_group *group, struct target *target)
             }
         }
 
-        for (sil = group->sinpls; sil; sil = sil->next) {
-            sinp = sil->sink_input;
-            if (!sinp->sink) {
+        for (sol = group->soutls; sol; sol = sol->next) {
+            sout = sol->source_output;
+            if (!sout->source) {
                 pa_log_debug("Re-attaching %s to %s",
-                             pa_sink_input_ext_get_name(sinp),
-                             pa_sink_ext_get_name(group->sink));
-                if (pa_sink_input_finish_move(sinp, group->sink, true) < 0) {
+                             pa_source_output_ext_get_name(sout),
+                             pa_source_ext_get_name(group->source));
+                if (pa_source_output_finish_move(sout, group->source, true) < 0) {
                     ret = -1;
                     pa_log_error("Failed to re-attach %s to %s",
-                                 pa_sink_input_ext_get_name(sinp),
-                                 pa_sink_ext_get_name(group->sink));
-                }
-                else
+                                 pa_source_output_ext_get_name(sout),
+                                 pa_source_ext_get_name(group->source));
+                } else
                     group->num_moving--;
             }
         }
