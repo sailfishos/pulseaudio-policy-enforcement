@@ -57,6 +57,7 @@ PA_MODULE_USAGE(
     "dbus_policyd_path=<policy daemon's path> "
     "dbus_policyd_name=<policy daemon's name> "
     "null_sink_name=<name of the null sink> "
+    "null_source=<name of the null source> "
     "othermedia_preemption=<on|off> "
     "route_sources_first=<true|false> Default false "
     "configdir=<configuration directory> "
@@ -70,6 +71,7 @@ static const char* const valid_modargs[] = {
     "dbus_policyd_path",
     "dbus_policyd_name",
     "null_sink_name",
+    "null_source_name",
     "othermedia_preemption",
     "route_sources_first",
     "configdir",
@@ -87,6 +89,7 @@ int pa__init(pa_module *m) {
     const char      *pdpath;
     const char      *pdnam;
     const char      *nsnam;
+    const char      *nsource;
     const char      *preempt;
     bool             route_sources_first = false;
     const char      *cfgdir;
@@ -105,6 +108,7 @@ int pa__init(pa_module *m) {
     pdpath  = pa_modargs_get_value(ma, "dbus_policyd_path", NULL);
     pdnam   = pa_modargs_get_value(ma, "dbus_policyd_name", NULL);
     nsnam   = pa_modargs_get_value(ma, "null_sink_name", NULL);
+    nsource = pa_modargs_get_value(ma, "null_source_name", NULL);
     preempt = pa_modargs_get_value(ma, "othermedia_preemption", NULL);
     cfgdir  = pa_modargs_get_value(ma, "configdir", NULL);
 
@@ -125,6 +129,7 @@ int pa__init(pa_module *m) {
     u->core     = m->core;
     u->module   = m;
     u->nullsink = pa_sink_ext_init_null_sink(nsnam);
+    u->nullsource= pa_source_ext_init_null_source(nsource);
     u->hsnk     = pa_index_hash_init(8);
     u->hsi      = pa_index_hash_init(10);
     u->scl      = pa_client_ext_subscription(u);
@@ -212,6 +217,7 @@ void pa__done(pa_module *m) {
     pa_index_hash_free(u->hsnk);
     pa_index_hash_free(u->hsi);
     pa_sink_ext_null_sink_free(u->nullsink);
+    pa_source_ext_null_source_free(u->nullsource);
     pa_shared_data_unref(u->shared);
 
     

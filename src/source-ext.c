@@ -212,6 +212,12 @@ static void handle_new_source(struct userdata *u, struct pa_source *source)
         name = pa_source_ext_get_name(source);
         idx  = source->index;
 
+        if (pa_streq(name, u->nullsource->name)) {
+            u->nullsource->source = source;
+            pa_log_debug("new source '%s' (idx=%d) will be used to "
+                         "mute-by-route", name, idx);
+        }
+
         if (pa_policy_log_level_debug()) {
             pa_classify_source(u, source, 0, 0, &r);
             buf = pa_policy_log_concat(r->types, r->count);
@@ -247,11 +253,19 @@ static void handle_removed_source(struct userdata *u, struct pa_source *source)
     const char      *name;
     uint32_t         idx;
     char            *buf;
+    struct pa_null_source     *ns;
     struct pa_classify_result *r;
 
     if (source && u) {
         name = pa_source_ext_get_name(source);
         idx  = source->index;
+        ns   = u->nullsource;
+
+        if (ns->source == source) {
+            pa_log_debug("cease to use source '%s' (idx=%u) to mute-by-route",
+                         name, idx);
+            ns->source = NULL;
+        }
 
         pa_policy_context_unregister(u, pa_policy_object_source,
                                      name, source, idx);
@@ -273,6 +287,25 @@ static void handle_removed_source(struct userdata *u, struct pa_source *source)
         pa_classify_source(u, source, PA_POLICY_DISABLE_NOTIFY, 0, &r);
         pa_policy_send_device_state(u, PA_POLICY_DISCONNECTED, r);
         pa_xfree(r);
+    }
+}
+
+struct pa_null_source *pa_source_ext_init_null_source(const char *name)
+{
+    struct pa_null_source *null_source = pa_xnew0(struct pa_null_source, 1);
+
+    /* source.null is temporary to de-couple PA releases from ours */
+    null_source->name = pa_xstrdup(name ? name : /* "null" */ "source.null");
+    null_source->source = NULL;
+
+    return null_source;
+}
+
+void pa_source_ext_null_source_free(struct pa_null_source *null_source)
+{
+    if (null_source) {
+        pa_xfree(null_source->name);
+        pa_xfree(null_source);
     }
 }
 

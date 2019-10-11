@@ -9,8 +9,8 @@
 
 #include <pulse/def.h>
 #include <pulse/proplist.h>
-#include <pulsecore/sink.h>
-#include <pulsecore/sink-input.h>
+#include <pulsecore/source.h>
+#include <pulsecore/source-output.h>
 
 #include "policy-group.h"
 #include "source-ext.h"
@@ -147,8 +147,21 @@ static pa_hook_result_t source_output_neew(void *hook_data, void *call_data,
     if ((group_name = pa_classify_source_output_by_data(u, data)) != NULL &&
         (group      = pa_policy_group_find(u, group_name)       ) != NULL   ){
 
-        if (group->source != NULL && (group->flags & route_flags)) {
-            sout_name = pa_proplist_gets(data->proplist, PA_PROP_MEDIA_NAME);
+        sout_name = pa_proplist_gets(data->proplist, PA_PROP_MEDIA_NAME);
+
+        if (group->mutebyrt_source) {
+            source_name = u->nullsource->name;
+
+            pa_log_debug("force stream '%s'/'%s' to source '%s' due to "
+                         "mute-by-route", group_name, sout_name, source_name);
+
+#if PULSEAUDIO_VERSION >= 12
+            pa_source_output_new_data_set_source(data, u->nullsource->source, false, false);
+#else
+            pa_source_output_new_data_set_source(data, u->nullsource->source, false);
+#endif
+        }
+        else if (group->source != NULL && (group->flags & route_flags)) {
             source_name = pa_source_ext_get_name(group->source);
 
             pa_log_debug("force source output '%s' to source '%s'",
