@@ -16,6 +16,9 @@ BuildRequires:  pkgconfig(pulsecore) >= %{pulsemajorminor}
 BuildRequires:  pkgconfig(libpulse) >= %{pulsemajorminor}
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(libmeego-common) >= 24
+BuildRequires:  autoconf
+BuildRequires:  automake
+BuildRequires:  libtool
 BuildRequires:  libtool-ltdl-devel
 
 %description
