@@ -44,7 +44,7 @@ make %{?jobs:-j%jobs}
 %install
 rm -rf %{buildroot}
 %make_install
-
+rm -f %{buildroot}/%{_libdir}/pulse-*/modules/*.la
 
 %files
 %defattr(-,root,root,-)
