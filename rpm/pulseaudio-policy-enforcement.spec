@@ -7,8 +7,7 @@ Name:       pulseaudio-policy-enforcement
 Summary:    Pulseaudio module for enforcing policy decisions in the audio domain
 Version:    %{pulsemajorminor}.41
 Release:    0
-Group:      System/Daemons
-License:    LGPLv2.1
+License:    LGPLv2
 URL:        https://github.com/nemomobile/pulseaudio-policy-enforcement
 Source0:    %{name}-%{version}.tar.gz
 BuildRequires:  pkgconfig(atomic_ops)
@@ -49,3 +48,4 @@ rm -f %{buildroot}/%{_libdir}/pulse-*/modules/*.la
 %files
 %defattr(-,root,root,-)
 %{_libdir}/pulse-*/modules/module-*.so
+%license COPYING
