@@ -260,9 +260,10 @@ int pa_policy_parse_config_files(struct userdata *u, const char *cfgfile, const 
 int policy_parse_config_file(struct userdata *u, const char *cfgfile, struct sections *sections)
 {
 #define BUFSIZE 512
+#define CONFIG_OVERRIDE_SUFFIX ".override"
 
     FILE              *f;
-    char               cfgpath[PATH_MAX];
+    char               cfgpath[PATH_MAX - sizeof(CONFIG_OVERRIDE_SUFFIX)];
     char               ovrpath[PATH_MAX];
     char              *path;
     char               buf[BUFSIZE];
@@ -274,8 +275,8 @@ int policy_parse_config_file(struct userdata *u, const char *cfgfile, struct sec
     if (!cfgfile)
         cfgfile = DEFAULT_CONFIG_FILE;
 
-    policy_file_path(cfgfile, cfgpath, PATH_MAX);
-    snprintf(ovrpath, PATH_MAX, "%s.override", cfgpath);
+    policy_file_path(cfgfile, cfgpath, sizeof(cfgpath));
+    snprintf(ovrpath, PATH_MAX, "%s" CONFIG_OVERRIDE_SUFFIX, cfgpath);
 
     if ((f = fopen(ovrpath,"r")) != NULL)
         path = ovrpath;
