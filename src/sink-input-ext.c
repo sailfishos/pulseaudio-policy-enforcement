@@ -489,7 +489,7 @@ static void handle_new_sink_input(struct userdata      *u,
         else
             ext->local.cork_state = update_state_flag(0,
                                                       PA_SINK_INPUT_EXT_STATE_USER,
-                                                      PA_SINK_INPUT_CORKED == pa_sink_input_get_state(sinp));
+                                                      PA_SINK_INPUT_CORKED == sinp->state);
 #if (PULSEAUDIO_VERSION == 5)
         if (preserve_mute_state)
             pa_log_debug("ignoring mute state as PulseAudio version 5 doesn't have mute hook.");
@@ -533,7 +533,7 @@ bool pa_sink_input_ext_cork(struct userdata *u, pa_sink_input *si, bool cork)
 
     pa_assert(!ext->local.ignore_cork_state_change);
 
-    sink_input_corked = pa_sink_input_get_state(si) == PA_SINK_INPUT_CORKED;
+    sink_input_corked = si->state == PA_SINK_INPUT_CORKED;
 
     pa_log_debug("sink input cork state before: user: %d policy: %d, request %scork",
                  ext->local.cork_state & PA_SINK_INPUT_EXT_STATE_USER ? 1 : 0,
@@ -586,7 +586,7 @@ static pa_hook_result_t sink_input_state_changed(pa_core *c, pa_sink_input *sinp
         return PA_HOOK_OK;
     }
 
-    corked_by_client = PA_SINK_INPUT_CORKED == pa_sink_input_get_state(sinp);
+    corked_by_client = PA_SINK_INPUT_CORKED == sinp->state;
     ext->local.cork_state = update_state_flag(ext->local.cork_state,
                                               PA_SINK_INPUT_EXT_STATE_USER,
                                               corked_by_client);

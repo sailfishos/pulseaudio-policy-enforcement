@@ -1094,8 +1094,8 @@ static bool group_sink_is_active(struct userdata *u, const char *group_name)
             return true;
 
         if ((sink = pa_policy_group_find_sink(u, group))) {
-            pa_log_debug("sink %s is %srunning", sink->name, pa_sink_get_state(sink) == PA_SINK_RUNNING ? "" : "not ");
-            return pa_sink_get_state(sink) == PA_SINK_RUNNING;
+            pa_log_debug("sink %s is %srunning", sink->name, sink->state == PA_SINK_RUNNING ? "" : "not ");
+            return sink->state == PA_SINK_RUNNING;
         }
     }
 
