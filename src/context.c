@@ -1242,7 +1242,7 @@ static int perform_activity_action(pa_sink *sink, struct pa_policy_activity_vari
     pa_assert(sink);
 
     if ((force_state != -1 && force_state == 1) ||
-        (force_state == -1 && PA_SINK_IS_OPENED(pa_sink_get_state(sink)))) {
+        (force_state == -1 && PA_SINK_IS_OPENED(sink->state))) {
         rule = var->active_rules;
         is_opened = 1;
     } else {

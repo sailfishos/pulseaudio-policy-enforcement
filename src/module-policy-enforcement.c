@@ -28,7 +28,6 @@
 #include <pulsecore/log.h>
 #include <meego/shared-data.h>
 
-#include "module-policy-enforcement-symdef.h"
 #include "log.h"
 #include "userdata.h"
 #include "index-hash.h"
