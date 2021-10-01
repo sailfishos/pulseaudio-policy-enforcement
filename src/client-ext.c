@@ -198,6 +198,16 @@ const char *pa_client_ext_arg0(struct pa_client *client)
     return arg0;
 }
 
+#ifndef PA_PROP_POLICY_APPLICATION_ID
+#define PA_PROP_POLICY_APPLICATION_ID "policy.application.id"
+#endif
+
+const char *pa_client_ext_app_id(struct pa_client *client)
+{
+    pa_assert(client);
+
+    return pa_proplist_gets(client->proplist, PA_PROP_POLICY_APPLICATION_ID);
+}
 
 static void handle_client_events(pa_core *c,pa_subscription_event_type_t t,
 				 uint32_t idx, void *userdata)
