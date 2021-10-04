@@ -519,7 +519,7 @@ static void handle_admin_message(struct userdata *u, DBusMessage *msg)
 static void handle_info_message(struct userdata *u, DBusMessage *msg)
 {
     dbus_uint32_t  txid;
-    dbus_uint32_t  pid;
+    char          *app_id;
     char          *oper;
     char          *group;
     char          *arg;
@@ -532,7 +532,7 @@ static void handle_info_message(struct userdata *u, DBusMessage *msg)
                                     DBUS_TYPE_UINT32, &txid,
                                     DBUS_TYPE_STRING, &oper,
                                     DBUS_TYPE_STRING, &group,
-                                    DBUS_TYPE_UINT32, &pid,
+                                    DBUS_TYPE_STRING, &app_id,
                                     DBUS_TYPE_STRING, &arg,
                                     DBUS_TYPE_STRING, &method_str,
                                     DBUS_TYPE_STRING, &prop,
@@ -572,18 +572,18 @@ static void handle_info_message(struct userdata *u, DBusMessage *msg)
     if (!strcmp(oper, "register")) {
 
         if (pa_policy_group_find(u, group) == NULL) {
-            pa_log_debug("register client (%s|%u) failed: unknown group",
-                         group, pid);
+            pa_log_debug("register client (%s|%s) failed: unknown group",
+                         group, app_id);
         }
         else {
-            pa_log_debug("register client (%s|%u)", group, pid);
-            pa_classify_register_pid(u, (pid_t)pid, prop, method, arg, group);
+            pa_log_debug("register client (%s|%s)", group, app_id);
+            pa_classify_register_app_id(u, app_id, prop, method, arg, group);
             pa_sink_input_ext_rediscover(u);
         }
     }
     else if (!strcmp(oper, "unregister")) {
-        pa_log_debug("unregister client (%s|%u)", group, pid);
-        pa_classify_unregister_pid(u, (pid_t)pid, prop, method, arg);
+        pa_log_debug("unregister client (%s|%s)", group, app_id);
+        pa_classify_unregister_app_id(u, app_id, prop, method, arg);
     }
     else {
         pa_log("invalid operation: '%s'", oper);

@@ -39,13 +39,10 @@ struct pa_sink_input;
 struct pa_sink_input_new_data;
 struct pa_card;
 
-struct pa_classify_pid_hash {
-    struct pa_classify_pid_hash *next;
-    pid_t                        pid;   /* process id (or parent process id) */
-                                        /* for stream classification */
-    pa_policy_match_object      *pid_match;
-    char                        *group; /* policy group name */
-};
+typedef struct pa_classify_app_id {
+    pa_policy_match_object      *match;
+    char                        *group;
+} pa_classify_app_id;
 
 struct pa_classify_stream_def {
     struct pa_classify_stream_def *next;
@@ -63,7 +60,7 @@ struct pa_classify_stream_def {
 };
 
 struct pa_classify_stream {
-    struct pa_classify_pid_hash   *pid_hash[PA_POLICY_PID_HASH_MAX];
+    pa_hashmap                    *app_id_map;
     struct pa_classify_stream_def *defs;
 };
 
@@ -160,6 +157,11 @@ void  pa_classify_update_stream_route(struct userdata *u, const char *sname);
 void  pa_classify_register_pid(struct userdata *, pid_t, const char *,
                                enum pa_classify_method, const char *, const char *);
 void  pa_classify_unregister_pid(struct userdata *, pid_t, const char *,
+                                 enum pa_classify_method, const char *);
+
+void  pa_classify_register_app_id(struct userdata *, const char *, const char *,
+                               enum pa_classify_method, const char *, const char *);
+void  pa_classify_unregister_app_id(struct userdata *, const char *, const char *,
                                  enum pa_classify_method, const char *);
 
 const char *pa_classify_sink_input(struct userdata *u, struct pa_sink_input *sinp,

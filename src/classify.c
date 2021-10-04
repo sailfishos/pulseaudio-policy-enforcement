@@ -35,20 +35,19 @@ static const char *find_group_for_client(struct userdata *, struct pa_client *,
 static char *arg_dump(int, char **, char *, size_t);
 #endif
 
-static void  pid_hash_free(struct pa_classify_pid_hash *);
-static void  pid_hash_free_all(struct pa_classify_pid_hash **);
-static void  pid_hash_insert(struct pa_classify_pid_hash **, pid_t,
-                             const char *, enum pa_classify_method,
-                             const char *, const char *);
-static void  pid_hash_remove(struct pa_classify_pid_hash **, pid_t,
-                             const char *, enum pa_classify_method,
-                             const char *);
-static char *pid_hash_get_group(struct pa_classify_pid_hash **, pid_t,
-                                pa_proplist *);
-static struct pa_classify_pid_hash
-            *pid_hash_find(struct pa_classify_pid_hash **, pid_t,
-                           const char *, enum pa_classify_method, const char *,
-                           struct pa_classify_pid_hash **);
+static void app_id_free(pa_classify_app_id *app);
+static void app_id_map_free_all(pa_hashmap *app_id_map);
+static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
+                              const char *prop, enum pa_classify_method method,
+                              const char *arg, const char *group);
+static void app_id_map_remove(pa_hashmap *app_id_map, const char *app_id,
+                              const char *prop, enum pa_classify_method method,
+                              const char *arg);
+static const char *app_id_get_group(pa_hashmap *map, const char *app_id,
+                                    pa_proplist *proplist);
+static pa_classify_app_id *app_id_map_find(pa_hashmap *app_id_map, const char *app_id,
+                                           const char *prop, enum pa_classify_method method,
+                                           const char *arg);
 
 static void streams_free(struct pa_classify_stream_def *);
 static void streams_add(struct userdata *u, struct pa_classify_stream_def **, const char *,
@@ -131,6 +130,10 @@ struct pa_classify *pa_classify_new(struct userdata *u)
     cl->sinks   = pa_xnew0(struct pa_classify_device, 1);
     cl->sources = pa_xnew0(struct pa_classify_device, 1);
     cl->cards   = pa_xnew0(struct pa_classify_card, 1);
+    cl->streams.app_id_map = pa_hashmap_new_full(pa_idxset_string_hash_func,
+                                                 pa_idxset_string_compare_func,
+                                                 pa_xfree,
+                                                 NULL);
 
     return cl;
 }
@@ -141,7 +144,7 @@ void pa_classify_free(struct userdata *u)
     uint32_t i;
 
     if (cl) {
-        pid_hash_free_all(cl->streams.pid_hash);
+        app_id_map_free_all(cl->streams.app_id_map);
         streams_free(cl->streams.defs);
         devices_free(cl->sinks);
         devices_free(cl->sources);
@@ -268,31 +271,32 @@ void pa_classify_update_stream_route(struct userdata *u, const char *sname)
     }
 }
 
-void pa_classify_register_pid(struct userdata *u, pid_t pid, const char *prop,
-                              enum pa_classify_method method, const char *arg,
-                              const char *group)
+void pa_classify_register_app_id(struct userdata *u, const char *app_id, const char *prop,
+                                 enum pa_classify_method method, const char *arg,
+                                 const char *group)
 {
     struct pa_classify *classify;
 
     pa_assert(u);
     pa_assert_se((classify = u->classify));
 
-    if (pid && group) {
-        pid_hash_insert(classify->streams.pid_hash, pid,
-                        prop, method, arg, group);
+    if (app_id && group) {
+        app_id_map_insert(classify->streams.app_id_map, app_id,
+                          prop, method, arg, group);
     }
 }
 
-void pa_classify_unregister_pid(struct userdata *u, pid_t pid, const char *prop,
-                                enum pa_classify_method method, const char *arg)
+void pa_classify_unregister_app_id(struct userdata *u, const char *app_id, const char *prop,
+                                   enum pa_classify_method method, const char *arg)
 {
     struct pa_classify *classify;
-    
+
     pa_assert(u);
     pa_assert_se((classify = u->classify));
 
-    if (pid) {
-        pid_hash_remove(classify->streams.pid_hash, pid, prop, method, arg);
+    if (app_id) {
+        app_id_map_remove(classify->streams.app_id_map, app_id,
+                          prop, method, arg);
     }
 }
 
@@ -734,19 +738,19 @@ static const char *find_group_for_client(struct userdata  *u,
                                          uint32_t         *flags_ret)
 {
     struct pa_classify *classify;
-    struct pa_classify_pid_hash **hash;
+    pa_hashmap *app_id_map;
     struct pa_classify_stream_def **defs;
-    pid_t       pid   = 0;          /* client processs PID */
-    const char *clnam = "";         /* client's name in PA */
-    uid_t       uid   = (uid_t) -1; /* client process user ID */
-    const char *exe   = "";         /* client's binary path */
-    const char *group = NULL;
-    uint32_t  flags = 0;
+    const char *app_id  = NULL;         /* client application id */
+    const char *clnam   = "";           /* client's name in PA */
+    uid_t       uid     = (uid_t) -1;   /* client process user ID */
+    const char *exe     = "";           /* client's binary path */
+    const char *group   = NULL;
+    uint32_t    flags   = 0;
 
     assert(u);
     pa_assert_se((classify = u->classify));
 
-    hash = classify->streams.pid_hash;
+    app_id_map = classify->streams.app_id_map;
     defs = &classify->streams.defs;
 
     if (client == NULL) {
@@ -759,9 +763,11 @@ static const char *find_group_for_client(struct userdata  *u,
 
         group = streams_get_group(u, defs, proplist, clnam, uid, exe, &flags);
     } else {
-        pid = pa_client_ext_pid(client);
+        app_id = pa_client_ext_app_id(client);
 
-        if ((group = pid_hash_get_group(hash, pid, proplist)) == NULL) {
+        if (!(group = app_id_get_group(app_id_map, app_id, proplist))) {
+
+            pa_log("could not find group");
             clnam = pa_client_ext_name(client);
             uid   = pa_client_ext_uid(client);
             exe   = pa_client_ext_exe(client);
@@ -773,9 +779,9 @@ static const char *find_group_for_client(struct userdata  *u,
     if (group == NULL)
         group = PA_POLICY_DEFAULT_GROUP_NAME;
 
-    pa_log_debug("%s (%s|%d|%d|%s) => %s,0x%x", __FUNCTION__,
-                 clnam?clnam:"<null>", pid, uid, exe?exe:"<null>",
-                 group?group:"<null>", flags);
+    pa_log_debug("%s (%s|%s|%d|%s) => %s,0x%x", __FUNCTION__,
+                 clnam ? clnam : "<null>", app_id ? app_id : "<null>", uid,
+                 exe ? exe : "<null>", group ? group : "<null>", flags);
 
     if (flags_ret != NULL)
         *flags_ret = flags;
@@ -809,168 +815,123 @@ static char *arg_dump(int argc, char **argv, char *buf, size_t len)
 }
 #endif
 
-static void pid_hash_free(struct pa_classify_pid_hash *st)
+static void app_id_free(pa_classify_app_id *app)
 {
-    pa_assert(st);
-
-    pa_policy_match_free(st->pid_match);
-    pa_xfree(st->group);
-    pa_xfree(st);
-}
-
-static void pid_hash_free_all(struct pa_classify_pid_hash **hash)
-{
-    struct pa_classify_pid_hash *st;
-    int i;
-
-    assert(hash);
-
-    for (i = 0;   i < PA_POLICY_PID_HASH_MAX;   i++) {
-        while ((st = hash[i]) != NULL) {
-            hash[i] = st->next;
-            pid_hash_free(st);
-        }
+    if (app) {
+        pa_xfree(app->group);
+        pa_xfree(app);
     }
 }
 
-static void pid_hash_insert(struct pa_classify_pid_hash **hash, pid_t pid,
-                            const char *prop, enum pa_classify_method method,
-                            const char *arg, const char *group)
+static void app_id_map_free_all(pa_hashmap *app_id_map)
 {
-    struct pa_classify_pid_hash *st;
-    struct pa_classify_pid_hash *prev;
+    if (app_id_map) {
+        while (!pa_hashmap_isempty(app_id_map))
+            app_id_free(pa_hashmap_steal_first(app_id_map));
+
+        pa_hashmap_free(app_id_map);
+    }
+}
+
+static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
+                              const char *prop, enum pa_classify_method method,
+                              const char *arg, const char *group)
+{
+    pa_classify_app_id *app;
     char *tmp = NULL;
 
-    pa_assert(hash);
+    pa_assert(app_id_map);
     pa_assert(group);
 
-    if ((st = pid_hash_find(hash, pid, prop,method,arg, &prev))) {
-        if (st->pid_match)
-            tmp = pa_policy_match_def(st->pid_match);
+    if ((app = app_id_map_find(app_id_map, app_id, prop, method, arg))) {
+        if (app->match)
+            tmp = pa_policy_match_def(app->match);
 
-        pa_log_debug("pid hash group changed (%u|%s) %s => %s", st->pid,
-                                                                tmp ? tmp : "",
-                                                                st->group,
-                                                                group);
-        pa_xfree(st->group);
-        st->group = pa_xstrdup(group);
-    }
-    else {
-        st  = pa_xnew0(struct pa_classify_pid_hash, 1);
+        pa_log_debug("app_id group changed (%s|%s) %s -> %s", app_id, tmp ? tmp : "",
+                                                              app->group, group);
 
-        st->next  = prev->next;
-        st->pid   = pid;
-        st->group = pa_xstrdup(group);
+        pa_xfree(app->group);
+        app->group = pa_xstrdup(group);
+    } else {
+        app = pa_xnew0(pa_classify_app_id, 1);
+
+        app->group = pa_xstrdup(group);
 
         if (prop) {
-            st->pid_match = pa_policy_match_property_new(pa_policy_object_proplist,
-                                                         prop,
-                                                         method,
-                                                         arg);
-            if (!st->pid_match)
-                pa_log("failed to create match object for pid %u group %s", st->pid, st->group);
+            app->match = pa_policy_match_property_new(pa_policy_object_proplist,
+                                                      prop,
+                                                      method,
+                                                      arg);
+            if (!app->match)
+                pa_log("failed to create match object for app_id %s group %s", app_id, app->group);
         }
 
-        if (st->pid_match)
-            tmp = pa_policy_match_def(st->pid_match);
+        if (app->match)
+            tmp = pa_policy_match_def(app->match);
 
-        prev->next = st;
+        pa_hashmap_put(app_id_map, pa_xstrdup(app_id), app);
 
-        pa_log_debug("pid hash added (%u|%s) => %s", st->pid,
-                                                     tmp ? tmp : "",
-                                                     st->group);
+        pa_log_debug("app_id added (%s|%s) => %s", app_id,
+                                                   tmp ? tmp : "",
+                                                   app->group);
     }
 
     pa_xfree(tmp);
 }
 
-static void pid_hash_remove(struct pa_classify_pid_hash **hash,
-                            pid_t pid, const char *prop,
-                            enum pa_classify_method method, const char *arg)
+static void app_id_map_remove(pa_hashmap *app_id_map, const char *app_id,
+                              const char *prop, enum pa_classify_method method,
+                              const char *arg)
 {
-    struct pa_classify_pid_hash *st;
-    struct pa_classify_pid_hash *prev;
+    pa_classify_app_id *app;
 
-    pa_assert(hash);
-
-    if ((st = pid_hash_find(hash, pid, prop,method,arg, &prev))) {
-        pa_log_debug("pid hash removed (%u) => %s", st->pid,
-                                                    st->group);
-        prev->next = st->next;
-        pid_hash_free(st);
+    if ((app = pa_hashmap_remove(app_id_map, app_id))) {
+        pa_log_debug("app_id removed (%s) => %s", app_id, app->group);
+        app_id_free(app);
     }
 }
 
-static char *pid_hash_get_group(struct pa_classify_pid_hash **hash,
-                                pid_t pid, pa_proplist *proplist)
+static const char *app_id_get_group(pa_hashmap *map, const char *app_id,
+                                    pa_proplist *proplist)
 {
-    struct pa_classify_pid_hash *st;
-    int idx;
-    char *group = NULL;
 
-    pa_assert(hash);
- 
-    if (pid) {
-        idx = pid & PA_POLICY_PID_HASH_MASK;
+    pa_classify_app_id *app;
+    const char *group = NULL;
 
-        for (st = hash[idx];  st != NULL;  st = st->next) {
-            if (pid == st->pid) {
-                if (!st->pid_match) {
-                    group = st->group;
-                    break;
-                }
+    pa_assert(map);
 
-                if (pa_policy_match(st->pid_match, proplist)) {
-                    group = st->group;
-                    break;
-                }
-            }
+    if (app_id) {
+        if ((app = pa_hashmap_get(map, app_id))) {
+            if (!app->match)
+                group = app->group;
+            else if (pa_policy_match(app->match, proplist))
+                group = app->group;
         }
     }
 
     return group;
 }
 
-static struct
-pa_classify_pid_hash *pid_hash_find(struct pa_classify_pid_hash **hash,
-                                    pid_t pid, const char *prop,
-                                    enum pa_classify_method method,
-                                    const char *arg,
-                                    struct pa_classify_pid_hash **prev_ret)
+static pa_classify_app_id *app_id_map_find(pa_hashmap *app_id_map, const char *app_id,
+                                           const char *prop, enum pa_classify_method method,
+                                           const char *arg)
 {
-    struct pa_classify_pid_hash *st;
-    struct pa_classify_pid_hash *prev;
-    int                          idx;
+    pa_classify_app_id *app = NULL;
 
-    idx = pid & PA_POLICY_PID_HASH_MASK;
+    if ((app = pa_hashmap_get(app_id_map, app_id))) {
+        if (!prop && !app->match)
+            return app;
 
-    for (prev = (struct pa_classify_pid_hash *)&hash[idx];
-         (st = prev->next) != NULL;
-         prev = prev->next)
-    {
-        if (pid && pid == st->pid) {
-            if (!prop && !st->pid_match)
-                break;
+        if (app->match && method == pa_policy_match_method(app->match)) {
+            if (method == pa_method_true)
+                return app;
 
-            if (st->pid_match && method == pa_policy_match_method(st->pid_match)) {
-                if (method == pa_method_true)
-                    break;
-
-                if (pa_safe_streq(arg, pa_policy_match_arg(st->pid_match)))
-                    break;
-            }
+            if (pa_safe_streq(arg, pa_policy_match_arg(app->match)))
+                return app;
         }
     }
 
-    if (prev_ret)
-        *prev_ret = prev;
-
-#if 0
-    pa_log_debug("%s(%d,'%s') => %p", __FUNCTION__,
-                 pid, stnam?stnam:"<null>", st);
-#endif
-
-    return st;
+    return NULL;
 }
 
 static void streams_free(struct pa_classify_stream_def *defs)

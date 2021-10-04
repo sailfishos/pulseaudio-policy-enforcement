@@ -25,6 +25,7 @@ uid_t  pa_client_ext_uid(struct pa_client *);
 const char *pa_client_ext_exe(struct pa_client *);
 const char *pa_client_ext_args(struct pa_client *);
 const char *pa_client_ext_arg0(struct pa_client *);
+const char *pa_client_ext_app_id(struct pa_client *);
 
 
 #endif
