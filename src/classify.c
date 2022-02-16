@@ -767,7 +767,6 @@ static const char *find_group_for_client(struct userdata  *u,
 
         if (!(group = app_id_get_group(app_id_map, app_id, proplist))) {
 
-            pa_log("could not find group");
             clnam = pa_client_ext_name(client);
             uid   = pa_client_ext_uid(client);
             exe   = pa_client_ext_exe(client);
