@@ -1,0 +1,30 @@
+module_policy_enforcement_sources = [
+  'card-ext.c',
+  'classify.c',
+  'client-ext.c',
+  'config-file.c',
+  'context.c',
+  'dbusif.c',
+  'index-hash.c',
+  'log.c',
+  'match.c',
+  'module-ext.c',
+  'module-policy-enforcement.c',
+  'policy-group.c',
+  'policy.c',
+  'sink-ext.c',
+  'sink-input-ext.c',
+  'source-ext.c',
+  'source-output-ext.c',
+  'variable.c',
+]
+
+module_policy_enforcement = shared_module('module-policy-enforcement',
+  module_policy_enforcement_sources,
+  include_directories : [configinc],
+  c_args : [pa_c_args, '-DPA_MODULE_NAME=module_policy_enforcement'],
+  install : true,
+  install_dir : modlibexecdir,
+  dependencies : [dbus_dep, meego_common_dep, pulsecore_dep],
+  name_prefix : ''
+)
