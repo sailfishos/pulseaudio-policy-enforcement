@@ -35,6 +35,5 @@ unset LD_AS_NEEDED
 %meson_install
 
 %files
-%defattr(-,root,root,-)
 %{_libdir}/pulse-*/modules/module-*.so
 %license COPYING
