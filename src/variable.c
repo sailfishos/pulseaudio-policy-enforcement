@@ -40,20 +40,22 @@ void  pa_policy_var_add(struct userdata *u, const char *var, const char *value)
 
 const char *pa_policy_var(struct userdata *u, const char *value)
 {
-    const char *lookup;
-    const char *r;
-
     pa_assert(u);
     pa_assert(u->vars);
 
-    r = value;
-
     if (u->vars->variables && value) {
-        if ((lookup = pa_hashmap_get(u->vars->variables, value)))
-            r = lookup;
+        const char *found = NULL;
+        const char *lookup = value;
+        while ((lookup = pa_hashmap_get(u->vars->variables, lookup)))
+            found = lookup;
+        if (found)
+            value = found;
     }
 
-    return r;
+    if (value && *value == '$')
+        pa_log("Undefined variable %s", value);
+
+    return value;
 }
 
 struct pa_policy_variable *pa_policy_var_init()
