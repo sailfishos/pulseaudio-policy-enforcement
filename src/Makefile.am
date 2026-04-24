@@ -14,6 +14,7 @@ module_policy_enforcement_la_SOURCES = \
 			source-output-ext.c \
 			card-ext.c \
 			module-ext.c \
+			port-ext.c \
 			classify.c \
 			policy-group.c \
 			context.c \

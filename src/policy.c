@@ -86,3 +86,13 @@ void pa_policy_send_device_state_full(struct userdata *u)
         pa_xfree(r);
     }
 }
+
+void pa_policy_send_port_available_changed(struct userdata *u,
+                                           const char *type,
+                                           bool available)
+{
+    pa_assert(u);
+    pa_assert(type);
+
+    pa_policy_dbusif_send_port_available_changed(u, type, available);
+}

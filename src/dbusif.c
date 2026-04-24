@@ -35,6 +35,10 @@
 #define POLICY_DBUS_PDPATH          "/com/nokia/policy"
 #define POLICY_DBUS_PDNAME          "org.freedesktop.ohm"
 
+#define SAILFISH_DBUS_POLICY_IFACE                      "com.sailfish.policy"
+#define SAILFISH_DBUS_POLICY_PATH                       "/com/sailfish/policy"
+#define SAILFISH_DBUS_POLICY_DEVICE_STATE_CHANGED       "deviceStateChanged"
+
 #define POLICY_DECISION             "decision"
 #define POLICY_STREAM_INFO          "stream_info"
 #define POLICY_ACTIONS              "audio_actions"
@@ -445,6 +449,48 @@ void pa_policy_dbusif_send_media_status(struct userdata *u, const char *media,
 
         dbus_message_unref(msg);
     }
+}
+
+void pa_policy_dbusif_send_port_available_changed(struct userdata *u,
+                                                  const char *type,
+                                                  bool available)
+{
+    int             success     = 0;
+    DBusConnection *conn        = pa_dbus_connection_get(u->dbusif->conn);
+    DBusMessage    *msg         = NULL;
+    dbus_int32_t    driver      = -1;
+    dbus_int32_t    connected   = available ? 1 : 0;
+    dbus_uint32_t   serial      = 0;
+
+    msg = dbus_message_new_method_call(POLICY_DBUS_PDNAME,
+                                       SAILFISH_DBUS_POLICY_PATH,
+                                       SAILFISH_DBUS_POLICY_IFACE,
+                                       SAILFISH_DBUS_POLICY_DEVICE_STATE_CHANGED);
+
+    if (!msg) {
+        pa_log("Failed to create D-Bus message to set availability");
+        goto done;
+    }
+
+    if (!(success = dbus_message_append_args(msg,
+                                             DBUS_TYPE_STRING, &type,
+                                             DBUS_TYPE_INT32, &driver,
+                                             DBUS_TYPE_INT32, &connected,
+                                             DBUS_TYPE_INVALID))) {
+        pa_log("Failed to build D-Bus message to set availability");
+        goto done;
+    }
+
+    if (!(success = dbus_connection_send(conn, msg, &serial))) {
+        pa_log("Failed to send message to set availability");
+        goto done;
+    }
+
+ done:
+    if (msg)
+        dbus_message_unref(msg);
+    if (success)
+        pa_log_info("Update port for %s -> %s", type, available ? "available" : "unavailable");
 }
 
 static DBusHandlerResult filter(DBusConnection *conn, DBusMessage *msg,

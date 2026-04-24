@@ -2173,6 +2173,8 @@ static int flags_parse(struct userdata  *u,
             flags |= PA_POLICY_DELAYED_PORT_CHANGE;
         else if (device && !strcmp(flagname, "module_unload_immediately"))
             flags |= PA_POLICY_MODULE_UNLOAD_IMMEDIATELY;
+        else if (device && !strcmp(flagname, "update_available"))
+            flags |= PA_POLICY_UPDATE_AVAILABLE;
 
         else if (stream && !strcmp(flagname, "mute_if_active"))
             flags |= PA_POLICY_LOCAL_MUTE;

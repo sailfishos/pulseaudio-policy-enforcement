@@ -30,6 +30,7 @@ struct pa_policy_context;
 struct pa_policy_dbusif;
 struct pa_policy_variable;
 struct pa_sink_ext_data;
+struct pa_port_ext;
 
 struct userdata {
     pa_core                   *core;
@@ -51,6 +52,7 @@ struct userdata {
     struct pa_policy_dbusif   *dbusif;
     struct pa_policy_variable *vars;
     struct pa_sink_ext_data   *sinkext;
+    struct pa_port_evsubscr   *portext;
     pa_shared_data            *shared;   /* for forwarding context etc properties */
 };
 

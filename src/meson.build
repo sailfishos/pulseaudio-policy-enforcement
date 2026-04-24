@@ -12,6 +12,7 @@ module_policy_enforcement_sources = [
   'module-policy-enforcement.c',
   'policy-group.c',
   'policy.c',
+  'port-ext.c',
   'sink-ext.c',
   'sink-input-ext.c',
   'source-ext.c',

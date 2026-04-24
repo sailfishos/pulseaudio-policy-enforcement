@@ -18,6 +18,9 @@ void pa_policy_dbusif_send_media_status(struct userdata *, const char *,
 void pa_policy_dbusif_send_card_profile_changed(struct userdata *u,
                                                 const struct pa_classify_result *list,
                                                 const char *profile);
+void pa_policy_dbusif_send_port_available_changed(struct userdata *u,
+                                                  const char *type,
+                                                  bool available);
 
 #endif
 
