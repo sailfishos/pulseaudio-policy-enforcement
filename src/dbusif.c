@@ -38,6 +38,7 @@
 #define SAILFISH_DBUS_POLICY_IFACE                      "com.sailfish.policy"
 #define SAILFISH_DBUS_POLICY_PATH                       "/com/sailfish/policy"
 #define SAILFISH_DBUS_POLICY_DEVICE_STATE_CHANGED       "deviceStateChanged"
+#define SAILFISH_DBUS_CARD_PROFILE_CHANGED              "cardProfileChanged"
 
 #define POLICY_DECISION             "decision"
 #define POLICY_STREAM_INFO          "stream_info"
@@ -57,10 +58,6 @@
 #define POLICY_DBUS_MEDIA_PATH      POLICY_DBUS_PDPATH "/" POLICY_DBUS_INFO
 #define POLICY_DBUS_STATE_ACT       "active"
 #define POLICY_DBUS_STATE_INACT     "inactive"
-
-#define POLICY_DBUS_CARD            "card_info"
-#define POLICY_DBUS_CARD_PATH       POLICY_DBUS_PDPATH "/" POLICY_DBUS_CARD
-#define POLICY_DBUS_CARD_PROFILE    "profile_changed"
 
 
 #define STRUCT_OFFSET(s,m) ((char *)&(((s *)0)->m) - (char *)0)
@@ -358,16 +355,11 @@ void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
 void pa_policy_dbusif_send_card_profile_changed(struct userdata *u, const struct pa_classify_result *list,
                                                 const char *profile)
 {
-    const char              *path = POLICY_DBUS_CARD_PATH;
-
     struct pa_policy_dbusif *dbusif = u->dbusif;
     DBusConnection          *conn   = pa_dbus_connection_get(dbusif->conn);
-    const char              *event  = POLICY_DBUS_CARD_PROFILE;
     DBusMessage             *msg    = NULL;
-    DBusMessageIter          mit;
-    DBusMessageIter          dit;
     uint32_t                 i;
-    int                      sts;
+    int                      success;
 
     if (!dbusif->regist)
         return;
@@ -378,37 +370,36 @@ void pa_policy_dbusif_send_card_profile_changed(struct userdata *u, const struct
     if (!profile)
         return;
 
-    msg = dbus_message_new_signal(path, dbusif->ifnam, POLICY_DBUS_CARD);
-
-    if (msg == NULL) {
-        pa_log("failed to create new " POLICY_DBUS_CARD " signal");
-        goto done;
-    }
-
-    dbus_message_iter_init_append(msg, &mit);
-
-    if (!dbus_message_iter_append_basic(&mit, DBUS_TYPE_STRING, &event) ||
-        !dbus_message_iter_append_basic(&mit, DBUS_TYPE_STRING, &profile) ||
-        !dbus_message_iter_open_container(&mit, DBUS_TYPE_ARRAY,"s", &dit)) {
-        pa_log("failed to build " POLICY_DBUS_CARD "/" POLICY_DBUS_CARD_PROFILE " signal");
-        goto done;
-    }
-
     for (i = 0; i < list->count; i++) {
-        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING, &list->types[i])) {
-            pa_log("failed to build " POLICY_DBUS_CARD "/" POLICY_DBUS_CARD_PROFILE " message");
-            goto done;
+        msg = dbus_message_new_method_call(POLICY_DBUS_PDNAME,
+                                           SAILFISH_DBUS_POLICY_PATH,
+                                           SAILFISH_DBUS_POLICY_IFACE,
+                                           SAILFISH_DBUS_CARD_PROFILE_CHANGED);
+
+        if (msg == NULL) {
+            pa_log("failed to create new " SAILFISH_DBUS_CARD_PROFILE_CHANGED " message");
+            break;
+        }
+
+        if (!(success = dbus_message_append_args(msg,
+                                                 DBUS_TYPE_STRING, &profile,
+                                                 DBUS_TYPE_STRING, &list->types[i],
+                                                 DBUS_TYPE_INVALID))) {
+            pa_log("Failed to build D-Bus " SAILFISH_DBUS_CARD_PROFILE_CHANGED " message");
+            break;
+        }
+
+        success = dbus_connection_send(conn, msg, NULL);
+
+        dbus_message_unref(msg);
+        msg = NULL;
+
+        if (!success) {
+            pa_log("Can't send " SAILFISH_DBUS_CARD_PROFILE_CHANGED " message");
+            break;
         }
     }
 
-    dbus_message_iter_close_container(&mit, &dit);
-
-    sts = dbus_connection_send(conn, msg, NULL);
-
-    if (!sts)
-        pa_log("Can't send " POLICY_DBUS_CARD " message: out of memory");
-
- done:
     if (msg)
         dbus_message_unref(msg);
 }
