@@ -38,6 +38,7 @@
 #define SAILFISH_DBUS_POLICY_IFACE                      "com.sailfish.policy"
 #define SAILFISH_DBUS_POLICY_PATH                       "/com/sailfish/policy"
 #define SAILFISH_DBUS_POLICY_DEVICE_STATE_CHANGED       "deviceStateChanged"
+#define SAILFISH_DBUS_POLICY_DEVICE_STATE_CHANGED_MANY  "deviceStateChangedMany"
 #define SAILFISH_DBUS_CARD_PROFILE_CHANGED              "cardProfileChanged"
 
 #define POLICY_DECISION             "decision"
@@ -298,56 +299,58 @@ void pa_policy_dbusif_done(struct userdata *u)
     }
 }
 
-void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
-                                        const struct pa_classify_result *list)
+void pa_policy_dbusif_send_device_state(struct userdata *u, bool is_connected, const struct pa_classify_result *list)
 {
-    const char              *path = POLICY_DBUS_STATE_PATH;
+    int                      success     = 0;
+    DBusConnection          *conn        = pa_dbus_connection_get(u->dbusif->conn);
+    DBusMessage             *msg         = NULL;
+    DBusMessageIter          msg_it;
+    DBusMessageIter          array_it;
+    dbus_int32_t             driver      = is_connected ? 1 : 0;
+    dbus_int32_t             connected   = -1;
+    dbus_uint32_t            serial      = 0;
 
-    struct pa_policy_dbusif *dbusif = u->dbusif;
-    DBusConnection          *conn   = pa_dbus_connection_get(dbusif->conn);
-    DBusMessage             *msg;
-    DBusMessageIter          mit;
-    DBusMessageIter          dit;
-    uint32_t                 i;
-    int                      sts;
+    msg = dbus_message_new_method_call(POLICY_DBUS_PDNAME,
+                                       SAILFISH_DBUS_POLICY_PATH,
+                                       SAILFISH_DBUS_POLICY_IFACE,
+                                       SAILFISH_DBUS_POLICY_DEVICE_STATE_CHANGED_MANY);
 
-    if (!dbusif->regist)
-        return;
-
-    if (!list || list->count == 0)
-        return;
-
-    msg = dbus_message_new_signal(path, dbusif->ifnam, POLICY_DBUS_INFO);
-
-    if (msg == NULL) {
-        pa_log("failed to make new info message");
-        goto fail;
+    if (!msg) {
+        pa_log("Failed to create D-Bus message to set availability");
+        goto done;
     }
 
-    dbus_message_iter_init_append(msg, &mit);
+    dbus_message_iter_init_append(msg, &msg_it);
 
-    if (!dbus_message_iter_append_basic(&mit, DBUS_TYPE_STRING, &state) ||
-        !dbus_message_iter_open_container(&mit, DBUS_TYPE_ARRAY,"s", &dit)){
-        pa_log("failed to build info message");
-        goto fail;
+    if (!dbus_message_iter_open_container(&msg_it, DBUS_TYPE_ARRAY,"(sii)", &array_it)) {
+        pa_log("failed to build device state changed message");
+        goto done;
     }
 
-    for (i = 0; i < list->count; i++) {
-        if (!dbus_message_iter_append_basic(&dit, DBUS_TYPE_STRING, &list->types[i])) {
-            pa_log("failed to build info message");
-            goto fail;
+    for (int i = 0; i < list->count; i++) {
+        DBusMessageIter struct_it;
+        dbus_message_iter_open_container(&array_it, DBUS_TYPE_STRUCT, NULL, &struct_it);
+
+        if (!dbus_message_iter_append_basic(&struct_it, DBUS_TYPE_STRING, &list->types[i]) ||
+            !dbus_message_iter_append_basic(&struct_it, DBUS_TYPE_INT32, &driver) ||
+            !dbus_message_iter_append_basic(&struct_it, DBUS_TYPE_INT32, &connected)) {
+            pa_log("failed to build device state changed message");
+            goto done;
         }
+
+        dbus_message_iter_close_container(&array_it, &struct_it);
+        pa_log_info("Update device state [%d/%d] type %s -> %s",
+                    i + 1, list->count, list->types[i], is_connected ? "connected" : "disconnected");
     }
 
-    dbus_message_iter_close_container(&mit, &dit);
+    dbus_message_iter_close_container(&msg_it, &array_it);
 
-    sts = dbus_connection_send(conn, msg, NULL);
-
-    if (!sts) {
-        pa_log("Can't send info message: out of memory");
+    if (!(success = dbus_connection_send(conn, msg, &serial))) {
+        pa_log("Failed to send message to set device connected states");
+        goto done;
     }
 
- fail:
+ done:
     if (msg)
         dbus_message_unref(msg);
 }
