@@ -14,10 +14,10 @@
 #include "classify.h"
 #include "log.h"
 
-void pa_policy_send_device_state(struct userdata *u, const char *state,
+void pa_policy_send_device_state(struct userdata *u, bool is_connected,
                                  const struct pa_classify_result *list)
 {
-    pa_policy_dbusif_send_device_state(u, state, list);
+    pa_policy_dbusif_send_device_state(u, is_connected, list);
 }
 
 void pa_policy_send_card_state(struct userdata *u, const struct pa_classify_result *list,
@@ -85,4 +85,14 @@ void pa_policy_send_device_state_full(struct userdata *u)
         pa_policy_dbusif_send_device_state(u, PA_POLICY_CONNECTED, r);
         pa_xfree(r);
     }
+}
+
+void pa_policy_send_port_available_changed(struct userdata *u,
+                                           const char *type,
+                                           bool available)
+{
+    pa_assert(u);
+    pa_assert(type);
+
+    pa_policy_dbusif_send_port_available_changed(u, type, available);
 }

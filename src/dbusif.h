@@ -10,7 +10,7 @@ struct pa_policy_dbusif *pa_policy_dbusif_init(struct userdata *, const char *,
                                                const char *, const char *,
                                                const char *, bool);
 void pa_policy_dbusif_done(struct userdata *);
-void pa_policy_dbusif_send_device_state(struct userdata *u, const char *state,
+void pa_policy_dbusif_send_device_state(struct userdata *u, bool is_connected,
                                         const struct pa_classify_result *list);
 void pa_policy_dbusif_send_media_status(struct userdata *, const char *,
                                         const char *, int);
@@ -18,6 +18,9 @@ void pa_policy_dbusif_send_media_status(struct userdata *, const char *,
 void pa_policy_dbusif_send_card_profile_changed(struct userdata *u,
                                                 const struct pa_classify_result *list,
                                                 const char *profile);
+void pa_policy_dbusif_send_port_available_changed(struct userdata *u,
+                                                  const char *type,
+                                                  bool available);
 
 #endif
 

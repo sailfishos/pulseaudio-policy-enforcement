@@ -1516,6 +1516,50 @@ struct pa_classify_port_entry *pa_classify_get_port_entry(struct pa_classify_dev
     return NULL;
 }
 
+int pa_classify_port_get_device_types(struct userdata *u,
+                                      pa_direction_t direction,
+                                      const char *port_name,
+                                      int flags,
+                                      struct pa_classify_result **p_types)
+{
+    struct pa_classify_port_entry *port;
+    struct pa_classify_result *result = NULL;
+    uint32_t idx;
+    int count = 0;
+
+    pa_assert(u);
+    pa_assert(port_name);
+
+    struct pa_classify_device_def *d = direction == PA_DIRECTION_OUTPUT ? u->classify->sinks->defs : u->classify->sources->defs;
+
+    if (p_types) {
+        *p_types = pa_xnew0(struct pa_classify_result, 1);
+        result = *p_types;
+    }
+
+    for (;  d->type;  d++) {
+        if (!d->data.ports || (flags && !(d->data.flags & flags)))
+            continue;
+
+        PA_IDXSET_FOREACH(port, d->data.ports, idx) {
+            if (pa_streq(port_name, port->port_name)) {
+                if (result) {
+                    if (result->count == 0) {
+                        result->types[result->count++] = d->type;
+                    } else {
+                        size_t newsize = sizeof(*result) + sizeof(result->types[0]) * (result->count + 1);
+                        result = *p_types = pa_xrealloc(result, newsize);
+                        result->types[result->count++] = d->type;
+                    }
+                }
+                count++;
+            }
+        }
+    }
+
+    return count;
+}
+
 /*
  * Local Variables:
  * c-basic-offset: 4

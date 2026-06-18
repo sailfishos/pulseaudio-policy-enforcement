@@ -22,9 +22,10 @@
 /* device flags */
 #define PA_POLICY_REFRESH_PORT_ALWAYS (1UL << 3)
 #define PA_POLICY_DELAYED_PORT_CHANGE (1UL << 4)
+#define PA_POLICY_UPDATE_AVAILABLE    (1UL << 5)
 
 /* module flags */
-#define PA_POLICY_MODULE_UNLOAD_IMMEDIATELY (1UL << 5)
+#define PA_POLICY_MODULE_UNLOAD_IMMEDIATELY (1UL << 6)
 
 /* module type */
 #define PA_POLICY_MODULE_FOR_SINK   (0)
@@ -211,6 +212,16 @@ struct pa_classify_port_entry *pa_classify_get_port_entry(struct pa_classify_dev
 
 int pa_classify_update_module(struct userdata *u, uint32_t dir, struct pa_classify_device_data *device);
 void pa_classify_update_modules(struct userdata *u, uint32_t dir, const char *type);
+
+/* Get all device types that contain give port name.
+ * Returns the number of device types containing the port,
+ * If types is not NULL it will be filled with the device types.
+ * Free the types pointer after use. */
+int pa_classify_port_get_device_types(struct userdata *u,
+                                      pa_direction_t direction,
+                                      const char *port_name,
+                                      int flags,
+                                      struct pa_classify_result **p_types);
 
 #endif
 
