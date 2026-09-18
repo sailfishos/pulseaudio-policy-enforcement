@@ -16,6 +16,7 @@ void  pa_policy_var_add(struct userdata *u, const char *var, const char *value)
 {
     bool update = false;
     const char *old_value;
+    char *new_value;
 
     pa_assert(u);
     pa_assert(u->vars);
@@ -26,16 +27,20 @@ void  pa_policy_var_add(struct userdata *u, const char *var, const char *value)
                                                  pa_xfree,
                                                  pa_xfree);
 
+    new_value = pa_replace(value, "%20", " ");
+
     if ((old_value = pa_hashmap_get(u->vars->variables, var))) {
-        if (pa_streq(old_value, value))
+        if (pa_streq(old_value, new_value)) {
+            pa_xfree(new_value);
             return;
+        }
 
         pa_hashmap_remove_and_free(u->vars->variables, var);
         update = true;
     }
 
-    pa_log_debug("variable %s (%s|%s)", update ? "updated" : "added", var, value);
-    pa_hashmap_put(u->vars->variables, pa_xstrdup(var), pa_xstrdup(value));
+    pa_log_debug("variable %s (%s|%s)", update ? "updated" : "added", var, new_value);
+    pa_hashmap_put(u->vars->variables, pa_xstrdup(var), new_value);
 }
 
 const char *pa_policy_var(struct userdata *u, const char *value)
