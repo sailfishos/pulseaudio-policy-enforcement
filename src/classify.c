@@ -36,7 +36,10 @@ static char *arg_dump(int, char **, char *, size_t);
 #endif
 
 static void app_id_free(pa_classify_app_id *app);
+static void app_id_list_free(pa_classify_app_id *list);
 static void app_id_map_free_all(pa_hashmap *app_id_map);
+static bool app_id_is_same(pa_classify_app_id *app, const char *prop,
+                           enum pa_classify_method method, const char *arg);
 static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
                               const char *prop, enum pa_classify_method method,
                               const char *arg, const char *group);
@@ -817,8 +820,19 @@ static char *arg_dump(int argc, char **argv, char *buf, size_t len)
 static void app_id_free(pa_classify_app_id *app)
 {
     if (app) {
+        pa_policy_match_free(app->match);
         pa_xfree(app->group);
         pa_xfree(app);
+    }
+}
+
+static void app_id_list_free(pa_classify_app_id *list)
+{
+    pa_classify_app_id *next;
+
+    for (; list; list = next) {
+        next = list->next;
+        app_id_free(list);
     }
 }
 
@@ -826,10 +840,27 @@ static void app_id_map_free_all(pa_hashmap *app_id_map)
 {
     if (app_id_map) {
         while (!pa_hashmap_isempty(app_id_map))
-            app_id_free(pa_hashmap_steal_first(app_id_map));
+            app_id_list_free(pa_hashmap_steal_first(app_id_map));
 
         pa_hashmap_free(app_id_map);
     }
+}
+
+static bool app_id_is_same(pa_classify_app_id *app, const char *prop,
+                           enum pa_classify_method method, const char *arg)
+{
+    if (!prop && !app->match)
+        return true;
+
+    if (app->match && method == pa_policy_match_method(app->match)) {
+        if (method == pa_method_true)
+            return true;
+
+        if (pa_safe_streq(arg, pa_policy_match_arg(app->match)))
+            return true;
+    }
+
+    return false;
 }
 
 static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
@@ -837,6 +868,7 @@ static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
                               const char *arg, const char *group)
 {
     pa_classify_app_id *app;
+    pa_classify_app_id *last;
     char *tmp = NULL;
 
     pa_assert(app_id_map);
@@ -849,11 +881,15 @@ static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
         pa_log_debug("app_id group changed (%s|%s) %s -> %s", app_id, tmp ? tmp : "",
                                                               app->group, group);
 
+        /* Several resource sets may register the same match, and it stays
+         * until the last of them unregisters it. */
+        app->refcount++;
         pa_xfree(app->group);
         app->group = pa_xstrdup(group);
     } else {
         app = pa_xnew0(pa_classify_app_id, 1);
 
+        app->refcount = 1;
         app->group = pa_xstrdup(group);
 
         if (prop) {
@@ -868,7 +904,14 @@ static void app_id_map_insert(pa_hashmap *app_id_map, const char *app_id,
         if (app->match)
             tmp = pa_policy_match_def(app->match);
 
-        pa_hashmap_put(app_id_map, pa_xstrdup(app_id), app);
+        /* One application may register several resource sets, each with
+         * its own stream match, so an app_id holds a list of them. */
+        if ((last = pa_hashmap_get(app_id_map, app_id))) {
+            while (last->next)
+                last = last->next;
+            last->next = app;
+        } else
+            pa_hashmap_put(app_id_map, pa_xstrdup(app_id), app);
 
         pa_log_debug("app_id added (%s|%s) => %s", app_id,
                                                    tmp ? tmp : "",
@@ -882,52 +925,68 @@ static void app_id_map_remove(pa_hashmap *app_id_map, const char *app_id,
                               const char *prop, enum pa_classify_method method,
                               const char *arg)
 {
+    pa_classify_app_id *head;
+    pa_classify_app_id *prev = NULL;
     pa_classify_app_id *app;
 
-    if ((app = pa_hashmap_remove(app_id_map, app_id))) {
-        pa_log_debug("app_id removed (%s) => %s", app_id, app->group);
-        app_id_free(app);
+    if (!(head = pa_hashmap_get(app_id_map, app_id)))
+        return;
+
+    for (app = head; app; prev = app, app = app->next) {
+        if (app_id_is_same(app, prop, method, arg))
+            break;
     }
+
+    if (!app || --app->refcount > 0)
+        return;
+
+    if (prev)
+        prev->next = app->next;
+    else {
+        pa_hashmap_remove(app_id_map, app_id);
+        if (app->next)
+            pa_hashmap_put(app_id_map, pa_xstrdup(app_id), app->next);
+    }
+
+    pa_log_debug("app_id removed (%s) => %s", app_id, app->group);
+    app_id_free(app);
 }
 
 static const char *app_id_get_group(pa_hashmap *map, const char *app_id,
                                     pa_proplist *proplist)
 {
-
+    pa_classify_app_id *head;
     pa_classify_app_id *app;
-    const char *group = NULL;
 
     pa_assert(map);
 
-    if (app_id) {
-        if ((app = pa_hashmap_get(map, app_id))) {
-            if (!app->match)
-                group = app->group;
-            else if (pa_policy_match(app->match, proplist))
-                group = app->group;
-        }
+    if (!app_id || !(head = pa_hashmap_get(map, app_id)))
+        return NULL;
+
+    /* A match on a specific property value wins over a catch-all. */
+    for (app = head; app; app = app->next) {
+        if (app->match && pa_policy_match_method(app->match) != pa_method_true &&
+            pa_policy_match(app->match, proplist))
+            return app->group;
     }
 
-    return group;
+    for (app = head; app; app = app->next) {
+        if (!app->match || pa_policy_match(app->match, proplist))
+            return app->group;
+    }
+
+    return NULL;
 }
 
 static pa_classify_app_id *app_id_map_find(pa_hashmap *app_id_map, const char *app_id,
                                            const char *prop, enum pa_classify_method method,
                                            const char *arg)
 {
-    pa_classify_app_id *app = NULL;
+    pa_classify_app_id *app;
 
-    if ((app = pa_hashmap_get(app_id_map, app_id))) {
-        if (!prop && !app->match)
+    for (app = pa_hashmap_get(app_id_map, app_id); app; app = app->next) {
+        if (app_id_is_same(app, prop, method, arg))
             return app;
-
-        if (app->match && method == pa_policy_match_method(app->match)) {
-            if (method == pa_method_true)
-                return app;
-
-            if (pa_safe_streq(arg, pa_policy_match_arg(app->match)))
-                return app;
-        }
     }
 
     return NULL;

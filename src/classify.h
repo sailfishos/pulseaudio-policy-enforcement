@@ -41,8 +41,10 @@ struct pa_sink_input_new_data;
 struct pa_card;
 
 typedef struct pa_classify_app_id {
+    struct pa_classify_app_id   *next;
     pa_policy_match_object      *match;
     char                        *group;
+    unsigned                     refcount;
 } pa_classify_app_id;
 
 struct pa_classify_stream_def {
