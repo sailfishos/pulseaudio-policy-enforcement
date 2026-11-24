@@ -213,6 +213,19 @@ pa_policy_context_add_property_rule(struct userdata *u, const char *varname,
     return rule;
 }
 
+static pa_policy_match_object *
+context_object_match(enum pa_policy_object_type type,
+                     enum pa_classify_method method,
+                     const char *arg,
+                     const char *match_prop)
+{
+    /* match_prop NULL selects the object name, same as device "(name)". */
+    if (match_prop)
+        return pa_policy_match_property_new(type, match_prop, method, arg);
+
+    return pa_policy_match_name_new(type, method, arg);
+}
+
 void
 pa_policy_context_add_property_action(struct userdata *u,
                                       struct pa_policy_context_rule *rule,
@@ -220,6 +233,7 @@ pa_policy_context_add_property_action(struct userdata *u,
                                       enum pa_policy_object_type  obj_type,
                                       enum pa_classify_method     obj_classify,
                                       const char                 *obj_name,
+                                      const char                 *match_prop,
                                       const char                 *prop_name,
                                       enum pa_policy_value_type   value_type,
                                       ...                     /* value_arg */)
@@ -230,6 +244,7 @@ pa_policy_context_add_property_action(struct userdata *u,
 
     /* update variables */
     pa_policy_var_update(u, obj_name);
+    pa_policy_var_update(u, match_prop);
     pa_policy_var_update(u, prop_name);
 
     action  = pa_xmalloc0(sizeof(*action));
@@ -239,9 +254,8 @@ pa_policy_context_add_property_action(struct userdata *u,
     setprop->lineno = lineno;
 
     setprop->object.type = obj_type;
-    setprop->object.match = pa_policy_match_name_new(obj_type,
-                                                     obj_classify,
-                                                     obj_name);
+    setprop->object.match = context_object_match(obj_type, obj_classify,
+                                                 obj_name, match_prop);
 
     setprop->property = pa_xstrdup(prop_name);
 
@@ -259,6 +273,7 @@ pa_policy_context_delete_property_action(struct userdata *u,
                                          enum pa_policy_object_type obj_type,
                                          enum pa_classify_method  obj_classify,
                                          const char              *obj_name,
+                                         const char              *match_prop,
                                          const char              *prop_name)
 {
     union pa_policy_context_action *action;
@@ -266,6 +281,7 @@ pa_policy_context_delete_property_action(struct userdata *u,
 
     /* update variables */
     pa_policy_var_update(u, obj_name);
+    pa_policy_var_update(u, match_prop);
     pa_policy_var_update(u, prop_name);
 
     action  = pa_xmalloc0(sizeof(*action));
@@ -275,7 +291,8 @@ pa_policy_context_delete_property_action(struct userdata *u,
     delprop->lineno = lineno;
 
     delprop->object.type = obj_type;
-    delprop->object.match = pa_policy_match_string_new(obj_classify, obj_name);
+    delprop->object.match = context_object_match(obj_type, obj_classify,
+                                                 obj_name, match_prop);
 
     delprop->property = pa_xstrdup(prop_name);
 
@@ -314,6 +331,7 @@ pa_policy_context_override_action(struct userdata               *u,
                                   enum pa_policy_object_type     obj_type,
                                   enum pa_classify_method        obj_classify,
                                   const char                    *obj_name,
+                                  const char                    *match_prop,
                                   const char                    *profile_name,
                                   enum pa_policy_value_type      value_type,
                                   ...                         /* value_arg */)
@@ -324,6 +342,7 @@ pa_policy_context_override_action(struct userdata               *u,
 
     /* update variables */
     pa_policy_var_update(u, obj_name);
+    pa_policy_var_update(u, match_prop);
     pa_policy_var_update(u, profile_name);
 
     action  = pa_xmalloc0(sizeof(*action));
@@ -333,7 +352,11 @@ pa_policy_context_override_action(struct userdata               *u,
     overr->lineno = lineno;
 
     overr->object.type = obj_type;
-    overr->object.match = pa_policy_match_string_new(obj_classify, obj_name);
+    if (match_prop)
+        overr->object.match = pa_policy_match_property_new(obj_type, match_prop,
+                                                           obj_classify, obj_name);
+    else
+        overr->object.match = pa_policy_match_string_new(obj_classify, obj_name);
 
     overr->profile = pa_xstrdup(profile_name);
 
@@ -634,6 +657,11 @@ static void delete_action(union pa_policy_context_action **actions,
 
             case pa_policy_set_default:
                 /* no-op */
+                break;
+
+            case pa_policy_delete_property:
+                pa_policy_match_free(action->delprop.object.match);
+                pa_xfree(action->delprop.property);
                 break;
 
             case pa_policy_override:
