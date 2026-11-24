@@ -63,11 +63,12 @@ enum device_class {
 };
 
 
-#define PROPERTY_ACTION_COMMON                                                \
-    enum pa_policy_object_type objtype; /* eg. sink, source, sink-input etc */\
-    enum pa_classify_method    method;  /* obj.name based classif. method   */\
-    char                      *arg;     /* obj.name based classif. argument */\
-    char                      *propnam  /* name of property                 */
+#define PROPERTY_ACTION_COMMON                                                      \
+    enum pa_policy_object_type objtype;     /* eg. sink, source, sink-input etc  */ \
+    enum pa_classify_method    method;      /* classification method             */ \
+    char                      *arg;         /* classification argument           */ \
+    char                      *matchprop;   /* NULL: name, else property name    */ \
+    char                      *propnam      /* name of property to set/delete    */
 
 struct anyprop {
     PROPERTY_ACTION_COMMON;
@@ -713,6 +714,7 @@ static void ctxact_free(struct ctxact *act) {
         case pa_policy_set_property:
             setprop = &act->setprop;
             pa_xfree(setprop->arg);
+            pa_xfree(setprop->matchprop);
             pa_xfree(setprop->propnam);
             pa_xfree(setprop->valarg);
             break;
@@ -720,6 +722,7 @@ static void ctxact_free(struct ctxact *act) {
         case pa_policy_delete_property:
             delprop = &act->delprop;
             pa_xfree(delprop->arg);
+            pa_xfree(delprop->matchprop);
             pa_xfree(delprop->propnam);
             break;
 
@@ -731,6 +734,7 @@ static void ctxact_free(struct ctxact *act) {
         case pa_policy_override:
             setprop = &act->setprop;
             pa_xfree(setprop->arg);
+            pa_xfree(setprop->matchprop);
             pa_xfree(setprop->propnam);
             pa_xfree(setprop->valarg);
             break;
@@ -951,6 +955,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setprop->objtype,
                                           setprop->method,
                                           setprop->arg,
+                                          setprop->matchprop,
                                           setprop->propnam,
                                           setprop->valtype,
                                           setprop->valarg
@@ -968,6 +973,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                           delprop->objtype,
                                           delprop->method,
                                           delprop->arg,
+                                          delprop->matchprop,
                                           delprop->propnam
                         );
                     }
@@ -996,6 +1002,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setprop->objtype,
                                           setprop->method,
                                           setprop->arg,
+                                          setprop->matchprop,
                                           setprop->propnam,
                                           setprop->valtype,
                                           setprop->valarg
@@ -1037,6 +1044,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setprop->objtype,
                                           setprop->method,
                                           setprop->arg,
+                                          setprop->matchprop,
                                           setprop->propnam,
                                           setprop->valtype,
                                           setprop->valarg
@@ -1071,6 +1079,7 @@ static int section_close(struct userdata *u, struct section *sec)
                                           setprop->objtype,
                                           setprop->method,
                                           setprop->arg,
+                                          setprop->matchprop,
                                           setprop->propnam,
                                           setprop->valtype,
                                           setprop->valarg
@@ -1802,7 +1811,8 @@ static int contextsetprop_parse(int lineno, char *setpropdef,
     char           *valarg;
 
     /*
-     * sink-name@startswidth:alsa,property:foo,value@constant:bar
+     * sink-name@equals:alsa,property:foo,value@constant:bar
+     * sink-property:device.bus@equals:bluetooth,property:foo,value@constant:bar
      */
 
     size = sizeof(*act) * (*nact + 1);
@@ -1868,7 +1878,8 @@ static int contextdelprop_parse(int lineno, char *delpropdef,
     char           *propdef;
 
     /*
-     * sink-name@startswidth:alsa,property:foo
+     * sink-name@equals:alsa,property:foo
+     * sink-property:device.bus@equals:bluetooth,property:foo
      */
 
     size = sizeof(*act) * (*nact + 1);
@@ -1966,7 +1977,8 @@ static int contextoverride_parse(int lineno, char *setoverridedef,
     char           *valarg;
 
     /*
-     * card-name@startswidth:foo,profile:bar,value@constant:foobar
+     * card-name@equals:foo,profile:bar,value@constant:foobar
+     * card-property:device.bus@equals:usb,profile:bar,value@constant:foobar
      */
 
     size = sizeof(*act) * (*nact + 1);
@@ -2021,77 +2033,113 @@ static int contextoverride_parse(int lineno, char *setoverridedef,
 static int contextanyprop_parse(int lineno, char *objdef, char *propdef,
                                 struct anyprop *anyprop)
 {
-    char          *colon;
-    char          *method;
-    char          *arg;
-    char          *propnam;
+    static const struct {
+        const char                 *prefix;
+        size_t                      len;
+        enum pa_policy_object_type  type;
+        int                         by_property;
+    } spec[] = {
+        { "source-output-property:", sizeof("source-output-property:") - 1,
+          pa_policy_object_source_output, 1 },
+        { "source-output-name@", sizeof("source-output-name@") - 1,
+          pa_policy_object_source_output, 0 },
+        { "sink-input-property:", sizeof("sink-input-property:") - 1,
+          pa_policy_object_sink_input, 1 },
+        { "sink-input-name@", sizeof("sink-input-name@") - 1,
+          pa_policy_object_sink_input, 0 },
+        { "module-property:", sizeof("module-property:") - 1,
+          pa_policy_object_module, 1 },
+        { "module-name@", sizeof("module-name@") - 1,
+          pa_policy_object_module, 0 },
+        { "source-property:", sizeof("source-property:") - 1,
+          pa_policy_object_source, 1 },
+        { "source-name@", sizeof("source-name@") - 1,
+          pa_policy_object_source, 0 },
+        { "sink-property:", sizeof("sink-property:") - 1,
+          pa_policy_object_sink, 1 },
+        { "sink-name@", sizeof("sink-name@") - 1,
+          pa_policy_object_sink, 0 },
+        { "card-property:", sizeof("card-property:") - 1,
+          pa_policy_object_card, 1 },
+        { "card-name@", sizeof("card-name@") - 1,
+          pa_policy_object_card, 0 },
+    };
+    unsigned                   i;
+    int                        by_property = 0;
+    char                      *rest = NULL;
+    char                      *colon;
+    char                      *at;
+    enum pa_classify_method    method_val = pa_method_unknown;
+    char                      *matchprop = NULL;
+    char                      *arg = NULL;
+    char                      *propnam;
 
     /*
-     * objdef  = "sink-name@startswidth:alsa"
-     * propdef = "property:foo"
+     * objdef  = "sink-name@equals:alsa"
+     *         | "sink-property:device.bus@equals:bluetooth"
+     * propdef = "property:foo" | "profile:bar"
+     *
+     * Property form uses the same classification syntax as device sections
+     * (method_parse): <property>@<equals|startswith|matches>:<value>
      */
-    if (!strncmp(objdef, "module-name@", 12)) {
-        anyprop->objtype = pa_policy_object_module;
-        method = objdef + 12;
+
+    for (i = 0; i < sizeof(spec) / sizeof(spec[0]); i++) {
+        if (!strncmp(objdef, spec[i].prefix, spec[i].len)) {
+            anyprop->objtype = spec[i].type;
+            by_property = spec[i].by_property;
+            rest = objdef + spec[i].len;
+            break;
+        }
     }
-    else if (!strncmp(objdef, "card-name@", 10)) {
-        anyprop->objtype = pa_policy_object_card;
-        method = objdef + 10;
-    } 
-    else if (!strncmp(objdef, "sink-name@", 10)) {
-        anyprop->objtype = pa_policy_object_sink;
-        method = objdef + 10;
-    }
-    else if (!strncmp(objdef, "source-name@", 12)) {
-        anyprop->objtype = pa_policy_object_source;
-        method = objdef + 12;
-    }
-    else if (!strncmp(objdef, "sink-input-name@", 16)) {
-        anyprop->objtype = pa_policy_object_sink_input;
-        method = objdef + 16;
-    }
-    else if (!strncmp(objdef, "source-output-name@", 19)) {
-        anyprop->objtype = pa_policy_object_source_output;
-        method = objdef + 19;
-    }
-    else {
+
+    if (!rest) {
         pa_log("invalid object definition in line %d", lineno);
         return -1;
     }
 
-    if ((colon = strchr(method, ':')) == NULL) {
+    /*
+     * Name form is "<method>:<arg>". Property form is "<prop>@<method>:<arg>".
+     * '@' is only special before the first ':', so a value may contain '@'.
+     */
+    colon = strchr(rest, ':');
+    at = colon ? (char *) memchr(rest, '@', (size_t) (colon - rest)) : NULL;
+
+    if (by_property) {
+        if (!at || at == rest) {
+            pa_log("invalid property classification in line %d", lineno);
+            return -1;
+        }
+    } else if (at) {
         pa_log("invalid object definition in line %d", lineno);
         return -1;
     }
 
-    *colon = '\0';
-    arg = colon + 1;
-
-
-    if (!strcmp(method, "equals"))
-        anyprop->method = pa_method_equals;
-    else if (!strcmp(method, "startswith"))
-        anyprop->method = pa_method_startswith;
-    else if (!strcmp(method, "matches"))
-        anyprop->method = pa_method_matches;
-    else {
-        pa_log("invalid method '%s' in line %d", method, lineno);
+    if (method_parse(lineno, rest, &method_val, &matchprop, &arg) < 0)
         return -1;
-    }
-    
+
     if (!strncmp(propdef, "property:", 9))
         propnam = propdef + 9;
     else if (!strncmp(propdef, "profile:", 8))
         propnam = propdef + 8;
     else {
         pa_log("invalid property definition '%s' in line %d", propdef, lineno);
-        return -1;
+        goto fail;
     }
 
-    anyprop->arg     = pa_xstrdup(arg);
-    anyprop->propnam = pa_xstrdup(propnam);
-    
+    anyprop->method    = method_val;
+    anyprop->arg       = arg;
+    anyprop->matchprop = by_property ? matchprop : NULL;
+    anyprop->propnam   = pa_xstrdup(propnam);
+
+    if (!by_property)
+        pa_xfree(matchprop);
+
     return 0;
+
+fail:
+    pa_xfree(matchprop);
+    pa_xfree(arg);
+    return -1;
 }
 
 static int cardname_parse(int lineno, char *namedef, struct carddef *carddef, int field)

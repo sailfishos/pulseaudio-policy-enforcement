@@ -159,7 +159,7 @@ void pa_policy_context_add_property_action(struct userdata *,
                                            struct pa_policy_context_rule *,int,
                                            enum pa_policy_object_type,
                                            enum pa_classify_method, const char *,
-                                           const char *,
+                                           const char *, const char *,
                                            enum pa_policy_value_type, ...);
 
 void pa_policy_context_delete_property_action(struct userdata *,
@@ -167,7 +167,8 @@ void pa_policy_context_delete_property_action(struct userdata *,
                                               int,
                                               enum pa_policy_object_type,
                                               enum pa_classify_method,
-                                              const char *, const char *);
+                                              const char *, const char *,
+                                              const char *);
 
 void pa_policy_context_set_default_action(struct pa_policy_context_rule *rule,
                                           int lineno,
@@ -179,7 +180,7 @@ void pa_policy_context_override_action(struct userdata *u,
                                        struct pa_policy_context_rule *,int,
                                        enum pa_policy_object_type,
                                        enum pa_classify_method, const char *,
-                                       const char *,
+                                       const char *, const char *,
                                        enum pa_policy_value_type, ...);
 
 int pa_context_override_card_profile(struct userdata *u,
